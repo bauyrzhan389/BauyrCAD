@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bauyrcad"
+dynamic = ["version"]
+description = "Integrated parametric CAD modelling and finite element analysis"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Bauyrzhan" }]
+keywords = ["CAD", "FEA", "STEP", "OpenCASCADE", "finite element"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Scientific/Engineering",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Manufacturing",
+]
+dependencies = [
+    "cadquery-ocp==7.9.3.1.1",
+    "gmsh>=4.12",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pyamg>=5.0",
+    "PySide6>=6.6",
+    "pyvista>=0.43",
+    "pyvistaqt>=0.11",
+    "ezdxf>=1.1",
+    # PARDISO: ~30x faster than the fallbacks on thin-walled parts (Intel MKL, x86-64 only)
+    "pypardiso>=0.4; platform_machine == 'AMD64' or platform_machine == 'x86_64'",
+    "matplotlib>=3.7",
+    # SolidWorks export drives the installed SolidWorks through COM (Windows only)
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pyinstaller>=6.5"]
+fast = []                      # kept for old install commands; pypardiso is now a default
+
+[project.gui-scripts]
+bauyrcad = "bauyrcad.app:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "bauyrcad.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["bauyrcad*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

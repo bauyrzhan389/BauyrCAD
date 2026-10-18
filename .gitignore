@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.pyc
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+*.vtu
+
+# personal CAD projects (models, renders, results) - not part of the app
+projects/*
+!projects/README.md
+
+# private: client write-ups, agent notes, outputs and the publish rules (never committed)
+README-1.md
+AGENTS.md
+Claude outputs/
+packaging/public_rules.local.json

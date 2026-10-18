@@ -1,0 +1,233 @@
+{
+ "format": "bauyrcad-part",
+ "version": 1,
+ "units": "mm",
+ "part_number": "",
+ "description": "",
+ "features": [
+  {
+   "type": "sketch",
+   "id": "f1",
+   "name": "Sketch1",
+   "suppressed": false,
+   "plane": {
+    "name": "Front Plane",
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "normal": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "xdir": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   "sketch": {
+    "version": 2,
+    "points": [
+     [
+      0,
+      0.0,
+      0.0,
+      true
+     ],
+     [
+      1,
+      0.0,
+      0.0,
+      false
+     ],
+     [
+      2,
+      10.0,
+      0.0,
+      false
+     ],
+     [
+      3,
+      10.0,
+      10.0,
+      false
+     ],
+     [
+      4,
+      0.0,
+      10.0,
+      false
+     ]
+    ],
+    "entities": [
+     {
+      "type": "line",
+      "id": 1,
+      "construction": false,
+      "p1": 1,
+      "p2": 2
+     },
+     {
+      "type": "line",
+      "id": 2,
+      "construction": false,
+      "p1": 2,
+      "p2": 3
+     },
+     {
+      "type": "line",
+      "id": 3,
+      "construction": false,
+      "p1": 3,
+      "p2": 4
+     },
+     {
+      "type": "line",
+      "id": 4,
+      "construction": false,
+      "p1": 4,
+      "p2": 1
+     }
+    ],
+    "constraints": [
+     {
+      "id": 1,
+      "type": "horizontal",
+      "refs": [
+       [
+        "e",
+        1
+       ]
+      ],
+      "value": null,
+      "driving": true,
+      "label": null,
+      "data": {}
+     },
+     {
+      "id": 2,
+      "type": "horizontal",
+      "refs": [
+       [
+        "e",
+        3
+       ]
+      ],
+      "value": null,
+      "driving": true,
+      "label": null,
+      "data": {}
+     },
+     {
+      "id": 3,
+      "type": "vertical",
+      "refs": [
+       [
+        "e",
+        2
+       ]
+      ],
+      "value": null,
+      "driving": true,
+      "label": null,
+      "data": {}
+     },
+     {
+      "id": 4,
+      "type": "vertical",
+      "refs": [
+       [
+        "e",
+        4
+       ]
+      ],
+      "value": null,
+      "driving": true,
+      "label": null,
+      "data": {}
+     }
+    ],
+    "texts": [],
+    "next": [
+     5,
+     5,
+     5
+    ]
+   }
+  },
+  {
+   "type": "extrude",
+   "id": "f2",
+   "name": "Boss-Extrude1",
+   "suppressed": false,
+   "sketch_id": "f1",
+   "depth": 100.0,
+   "operation": "boss",
+   "end": "blind",
+   "reverse": false,
+   "regions": []
+  }
+ ],
+ "studies": [
+  {
+   "id": "study1",
+   "name": "Cantilever check",
+   "material": {
+    "name": "Plain Carbon Steel",
+    "E": 210000.0,
+    "nu": 0.28,
+    "yield_strength": 220.6,
+    "density": 7800.0,
+    "ultimate_strength": 399.8
+   },
+   "fixtures": [
+    {
+     "type": "fixed",
+     "id": "bc1",
+     "name": "Fixed-1",
+     "faces": [
+      {
+       "index": 4,
+       "centroid": [
+        5.0,
+        5.0,
+        0.0
+       ],
+       "area": 99.99999999999999,
+       "kind": "plane",
+       "normal": [
+        -0.0,
+        -0.0,
+        -1.0
+       ],
+       "radius": null
+      }
+     ]
+    }
+   ],
+   "loads": [
+    {
+     "type": "point_force",
+     "id": "bc2",
+     "name": "Tip load",
+     "point": [
+      5,
+      5,
+      100
+     ],
+     "force": [
+      0,
+      -100,
+      0
+     ]
+    }
+   ],
+   "mesh_size": 0.0,
+   "element_order": 2,
+   "mesh_controls": []
+  }
+ ]
+}
