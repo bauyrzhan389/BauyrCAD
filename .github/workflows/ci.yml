@@ -8,6 +8,7 @@ on:
 jobs:
   test:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,4 +24,4 @@ jobs:
         env:
           # API screenshots opt into off-screen rendering themselves; GUI tests need an interactor.
           PYVISTA_OFF_SCREEN: "false"
-        run: pytest -q
+        run: pytest -v -o faulthandler_timeout=120 --durations=15
