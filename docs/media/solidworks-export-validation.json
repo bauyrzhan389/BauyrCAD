@@ -1,0 +1,312 @@
+{
+  "recorded_on": "2026-11-02",
+  "method": "SolidWorks API dimension edit; actual application images; captioned animation",
+  "solidworks_edition_label": "Student Edition - Academic Use Only",
+  "solidworks_running_during_offline_export": false,
+  "native_export": true,
+  "stages": [
+    {
+      "stage": "opened_offline_export",
+      "boss_height_mm": 20.0,
+      "volume_mm3": 33927.07921065854,
+      "analytic_volume_mm3": 33927.07921065854,
+      "rebuild": "clean",
+      "tree": [
+        [
+          "Comments",
+          "CommentsFolder"
+        ],
+        [
+          "Favorites",
+          "FavoriteFolder"
+        ],
+        [
+          "History",
+          "HistoryFolder"
+        ],
+        [
+          "Selection Sets",
+          "SelectionSetFolder"
+        ],
+        [
+          "Sensors",
+          "SensorFolder"
+        ],
+        [
+          "Design Binder",
+          "DocsFolder"
+        ],
+        [
+          "Annotations",
+          "DetailCabinet"
+        ],
+        [
+          "Surface Bodies",
+          "SurfaceBodyFolder"
+        ],
+        [
+          "Solid Bodies",
+          "SolidBodyFolder"
+        ],
+        [
+          "Lights and Cameras",
+          "EnvFolder"
+        ],
+        [
+          "Markups",
+          "InkMarkupFolder"
+        ],
+        [
+          "Equations",
+          "EqnFolder"
+        ],
+        [
+          "Material <not specified>",
+          "MaterialFolder"
+        ],
+        [
+          "Front Plane",
+          "RefPlane"
+        ],
+        [
+          "Top Plane",
+          "RefPlane"
+        ],
+        [
+          "Right Plane",
+          "RefPlane"
+        ],
+        [
+          "Origin",
+          "OriginProfileFeature"
+        ],
+        [
+          "Sketch1",
+          "ProfileFeature"
+        ],
+        [
+          "Boss-Extrude1",
+          "Extrusion"
+        ],
+        [
+          "Sketch2",
+          "ProfileFeature"
+        ],
+        [
+          "Boss-Extrude2",
+          "ICE"
+        ],
+        [
+          "Sketch3",
+          "ProfileFeature"
+        ],
+        [
+          "Cut-Extrude1",
+          "ICE"
+        ]
+      ]
+    },
+    {
+      "stage": "edited_in_solidworks",
+      "boss_height_mm": 35.0,
+      "volume_mm3": 41466.90157927404,
+      "analytic_volume_mm3": 41466.90157927404,
+      "rebuild": "clean",
+      "tree": [
+        [
+          "Comments",
+          "CommentsFolder"
+        ],
+        [
+          "Favorites",
+          "FavoriteFolder"
+        ],
+        [
+          "History",
+          "HistoryFolder"
+        ],
+        [
+          "Selection Sets",
+          "SelectionSetFolder"
+        ],
+        [
+          "Sensors",
+          "SensorFolder"
+        ],
+        [
+          "Design Binder",
+          "DocsFolder"
+        ],
+        [
+          "Annotations",
+          "DetailCabinet"
+        ],
+        [
+          "Surface Bodies",
+          "SurfaceBodyFolder"
+        ],
+        [
+          "Solid Bodies",
+          "SolidBodyFolder"
+        ],
+        [
+          "Lights and Cameras",
+          "EnvFolder"
+        ],
+        [
+          "Markups",
+          "InkMarkupFolder"
+        ],
+        [
+          "Equations",
+          "EqnFolder"
+        ],
+        [
+          "Material <not specified>",
+          "MaterialFolder"
+        ],
+        [
+          "Front Plane",
+          "RefPlane"
+        ],
+        [
+          "Top Plane",
+          "RefPlane"
+        ],
+        [
+          "Right Plane",
+          "RefPlane"
+        ],
+        [
+          "Origin",
+          "OriginProfileFeature"
+        ],
+        [
+          "Sketch1",
+          "ProfileFeature"
+        ],
+        [
+          "Boss-Extrude1",
+          "Extrusion"
+        ],
+        [
+          "Sketch2",
+          "ProfileFeature"
+        ],
+        [
+          "Boss-Extrude2",
+          "ICE"
+        ],
+        [
+          "Sketch3",
+          "ProfileFeature"
+        ],
+        [
+          "Cut-Extrude1",
+          "ICE"
+        ]
+      ]
+    },
+    {
+      "stage": "saved_and_reopened",
+      "boss_height_mm": 35.0,
+      "volume_mm3": 41466.90157927405,
+      "analytic_volume_mm3": 41466.90157927404,
+      "rebuild": "clean",
+      "tree": [
+        [
+          "Comments",
+          "CommentsFolder"
+        ],
+        [
+          "Favorites",
+          "FavoriteFolder"
+        ],
+        [
+          "History",
+          "HistoryFolder"
+        ],
+        [
+          "Selection Sets",
+          "SelectionSetFolder"
+        ],
+        [
+          "Sensors",
+          "SensorFolder"
+        ],
+        [
+          "Design Binder",
+          "DocsFolder"
+        ],
+        [
+          "Annotations",
+          "DetailCabinet"
+        ],
+        [
+          "Surface Bodies",
+          "SurfaceBodyFolder"
+        ],
+        [
+          "Solid Bodies",
+          "SolidBodyFolder"
+        ],
+        [
+          "Lights and Cameras",
+          "EnvFolder"
+        ],
+        [
+          "Markups",
+          "InkMarkupFolder"
+        ],
+        [
+          "Equations",
+          "EqnFolder"
+        ],
+        [
+          "Material <not specified>",
+          "MaterialFolder"
+        ],
+        [
+          "Front Plane",
+          "RefPlane"
+        ],
+        [
+          "Top Plane",
+          "RefPlane"
+        ],
+        [
+          "Right Plane",
+          "RefPlane"
+        ],
+        [
+          "Origin",
+          "OriginProfileFeature"
+        ],
+        [
+          "Sketch1",
+          "ProfileFeature"
+        ],
+        [
+          "Boss-Extrude1",
+          "Extrusion"
+        ],
+        [
+          "Sketch2",
+          "ProfileFeature"
+        ],
+        [
+          "Boss-Extrude2",
+          "ICE"
+        ],
+        [
+          "Sketch3",
+          "ProfileFeature"
+        ],
+        [
+          "Cut-Extrude1",
+          "ICE"
+        ]
+      ]
+    }
+  ]
+}
