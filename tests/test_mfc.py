@@ -24,7 +24,10 @@ CFG, RF = "Contents/Config-0", "Contents/Config-0-ResolvedFeatures"
 
 
 def _sections(name):
-    return sldprt.read_sections(DATA / f"{name}.SLDPRT")
+    path = DATA / f"{name}.SLDPRT"
+    if not path.is_file():
+        pytest.skip(f"requires private SolidWorks comparison fixture: {path.name}")
+    return sldprt.read_sections(path)
 
 
 @pytest.mark.parametrize("name", DONORS)

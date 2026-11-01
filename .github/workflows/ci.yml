@@ -20,4 +20,7 @@ jobs:
       - name: Set up headless rendering
         uses: pyvista/setup-headless-display-action@9c1c7435d9635423c90d2c37489588c81673274a # v3
       - name: Test
+        env:
+          # API screenshots opt into off-screen rendering themselves; GUI tests need an interactor.
+          PYVISTA_OFF_SCREEN: "false"
         run: pytest -q

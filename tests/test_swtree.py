@@ -18,8 +18,15 @@ CFG, RF = "Contents/Config-0", "Contents/Config-0-ResolvedFeatures"
 NEW = ["Sketch2", "Boss-Extrude2"]
 
 
+def _donor(name):
+    path = DATA / f"{name}.SLDPRT"
+    if not path.is_file():
+        pytest.skip(f"requires private SolidWorks comparison fixture: {path.name}")
+    return path
+
+
 def _arc(name):
-    return mfc.load_archive(sldprt.read_sections(DATA / f"{name}.SLDPRT"))
+    return mfc.load_archive(sldprt.read_sections(_donor(name)))
 
 
 def _counters(arc):
@@ -52,7 +59,7 @@ def test_transplant_gives_what_solidworks_writes(base, want):
     assert [swtree.name(f) for f in new] == NEW
     ref = _arc(want)
     assert _counters(arc) == _counters(ref)
-    out, theirs = arc.dumps(), sldprt.read_sections(DATA / f"{want}.SLDPRT")
+    out, theirs = arc.dumps(), sldprt.read_sections(_donor(want))
     assert len(out[CFG]) == len(theirs[CFG]) and len(out[RF]) == len(theirs[RF])
     # the written archive reads back with the same tree
     again = mfc.load_archive({CFG: out[CFG], RF: out[RF]})
@@ -71,7 +78,7 @@ def test_transplant_refuses_what_it_cannot_place():
 
 
 def test_save_drops_the_regenerated_sections(tmp_path):
-    container, arc = swtree.load(DATA / "T3.SLDPRT")
+    container, arc = swtree.load(_donor("T3"))
     swtree.transplant(arc, _arc("P2"), NEW)
     path = tmp_path / "g2.SLDPRT"
     swtree.save(container, arc, path)
@@ -97,10 +104,10 @@ def _sketch1(arc):
 def test_a_profile_written_from_geometry_is_what_solidworks_writes():
     """P1's rectangle written again from its four lines gives SolidWorks' own feature archive
     but for the order of the profile chain (SolidWorks finds its own)."""
-    container, arc = swtree.load(DATA / "P1.SLDPRT")
+    container, arc = swtree.load(_donor("P1"))
     swtree.set_profile(arc, _sketch1(arc), [RECT])
     ours = arc.dumps()[RF]
-    theirs = sldprt.read_sections(DATA / "P1.SLDPRT")[RF]
+    theirs = sldprt.read_sections(_donor("P1"))[RF]
     assert len(ours) == len(theirs)
     assert sum(a != b for a, b in zip(ours, theirs)) <= 8
 
@@ -112,7 +119,7 @@ def test_a_profile_written_from_geometry_is_what_solidworks_writes():
 def test_profiles_match_solidworks_sketches(donor, loops):
     """A hexagon and a D shape (line + arc) written into P1 hold the entities, ids, counters
     and chains of SolidWorks' own sketches of the same shapes."""
-    _, arc = swtree.load(DATA / "P1.SLDPRT")
+    _, arc = swtree.load(_donor("P1"))
     swtree.set_profile(arc, _sketch1(arc), loops)
     again = mfc.load_archive(dict(zip((CFG, RF), (arc.dumps()[CFG], arc.dumps()[RF]))))
     ours, theirs = (_sketch1(a).values["sketch"].values for a in (again, _arc(donor)))
@@ -130,7 +137,7 @@ def test_profiles_match_solidworks_sketches(donor, loops):
 
 
 def test_profile_loops_must_close():
-    _, arc = swtree.load(DATA / "P1.SLDPRT")
+    _, arc = swtree.load(_donor("P1"))
     with pytest.raises(swtree.TreeError, match="does not end"):
         swtree.set_profile(arc, _sketch1(arc), [[("line", (0, 0), (40, 0)),
                                                  ("line", (40, 0), (40, 20))]])
