@@ -21,7 +21,7 @@ def tree(src: Path, dest: str):
 
 
 binaries = []
-datas = []
+datas = tree(ROOT / "bauyrcad" / "data" / "sw_seeds", "bauyrcad/data/sw_seeds")
 hiddenimports = []
 
 # OpenCASCADE: one big extension + stub packages; its DLLs are found through

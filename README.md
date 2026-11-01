@@ -1,13 +1,24 @@
 # BauyrCAD
 
-**Parametric CAD modelling and finite element analysis in one desktop application.**
+**Sketch it. Build it. See where it bends.**
 
-Sketch → extrude → cut → fix → load → mesh → solve → review stresses, all in one window and
-one project file, with no export/import step between CAD and FEA.
+BauyrCAD brings parametric modelling and finite element analysis into one desktop app.
+Draw a sketch, build your part, apply a load, and see the stresses—all in the same project.
+It also handles assemblies, manufacturing drawings, and Python scripts for repeatable designs.
+
+One of the most interesting things being built here is **editable SolidWorks export without
+running SolidWorks**. Supported parts export as native sketches and features with dimensions
+you can change in SolidWorks, preserving more of the work that went into the model.
+Coverage is still growing: this is an experimental exporter, and some features and assembly
+mates aren't supported yet. The [coverage tracker](docs/SW_FEATURE_COVERAGE.md) shows exactly
+where it stands.
+
+Built with Python, OpenCASCADE, PySide6, and an in-house sketch constraint solver.
+You can use the desktop interface or describe a model in code, then keep editing the same part.
 
 | Modelling | Simulation |
 |---|---|
-| Constraint-based sketcher with the SolidWorks tool set (see below) | Linear static analysis |
+| Constraint-based sketcher with familiar CAD tools (see below) | Linear static analysis |
 | Smart Dimension, geometric relations, drag-to-modify, fully/under-defined colouring | Quadratic 10-node tetrahedra (Gmsh), with an optional linear mode |
 | Extruded Boss: Blind, Mid Plane, reverse, **selected contours** (any closed area, even of crossing geometry) | Fixed Face fixtures |
 | Extruded Cut: Blind, Through All, Through All-Both | Point Force loads (vertex snap, normal-to-face helper) |
@@ -35,11 +46,13 @@ entity and everything connected follows while relations and dimensions hold. Blu
 under-defined and black means fully defined, as in SolidWorks. Adding a dimension that would
 over-define the sketch offers to make it a driven (reference) dimension.
 
-> **SolidWorks files:** `.sldprt` / `.sldasm` are closed formats that only SolidWorks can write,
-> so on a PC with SolidWorks installed, **File > Export to SolidWorks** has *your* SolidWorks
-> build them: parts with an editable feature tree (sketches, relations, dimensions, extrudes,
-> cuts, revolves) and assemblies with floating components and real mates, so they move in
-> SolidWorks. Without SolidWorks, use **STEP AP214 / AP242** (assemblies keep their structure).
+> **SolidWorks files without SolidWorks:** Export writes exact-solid `.SLDPRT` and `.SLDASM`
+> files. The **SolidWorks 2024 feature tree** format writes supported sketch/extrude/revolve trees
+> with editable dimensions. The dedicated editable-part export refuses unsupported models;
+> non-strict scripted export can fall back to an Imported solid with a reported reason.
+> Scripts use `part.export_solidworks_offline(path, require_native=True)` for strict native
+> output. With SolidWorks installed, **File > Export to SolidWorks** remains the broader COM
+> exporter, supporting additional feature families and assembly mates. See [API](docs/API.md).
 
 **Extrude while sketching:** click **Extruded Boss** or **Extruded Cut** on the Sketch tab.
 BauyrCAD accepts the current sketch and opens Extrude with that sketch selected; set the depth
@@ -61,7 +74,7 @@ Download `BauyrCAD-<version>-win64.zip` (or the installer) from the Releases pag
 and run `BauyrCAD.exe`.
 
 ### Option 2: from source
-Requires **Python 3.10–3.12** (the OpenCASCADE bindings don't ship wheels for 3.13+ yet).
+Use **Python 3.11**, the version used for development and testing.
 
 ```powershell
 py -3.11 -m venv .venv
@@ -161,13 +174,18 @@ Full reference: [docs/API.md](docs/API.md). Personal jobs go in `projects/` (kep
 
 ```powershell
 pip install -e .[dev]
-pytest                                         # 91 tests: solver, sketch tools, contours, modelling, formats, FEA, API/CLI, GUI
+pytest                                         # solver, modelling, formats, FEA, API/CLI and GUI
 .\packaging\build_windows.ps1                  # -> dist\BauyrCAD\BauyrCAD.exe + zip
 ```
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the code is organised and how to add
 new sketch tools, features, loads and element types, and [docs/ROADMAP.md](docs/ROADMAP.md)
 for the planned work.
+
+The complete format regression suite uses local reference fixtures under `tests/data/sw`
+that are omitted from the GitHub snapshot. Tests requiring those files cannot run from
+that snapshot alone. SolidWorks integration tests additionally need an appropriately
+licensed local installation; they skip while a user's SolidWorks session is running.
 
 ## License
 
@@ -183,11 +201,15 @@ Dassault Systèmes or Siemens**. SOLIDWORKS is a registered trademark of Dassaul
 SolidWorks Corporation; Parasolid is a trademark of Siemens Digital Industries Software. Other
 names are trademarks of their owners and are used only to describe compatibility.
 
-* **Export to SolidWorks** drives a SolidWorks installation the user already has, through its
-  public COM API. No SolidWorks code, libraries or files are part of BauyrCAD.
-* **Reading `.sldprt` / `.sldasm` files** (`bauyrcad/core/sldprt.py`) works from the structure of
-  the data files alone, for interoperability. No SolidWorks or Parasolid program code was
-  disassembled, and no Dassault or Siemens code, SDK or library is used. See
-  [docs/SLDPRT_FORMAT.md](docs/SLDPRT_FORMAT.md).
+* **Offline export** writes supported `.SLDPRT` feature histories without launching
+  SolidWorks. It uses bundled model seed files; these are data files, not SolidWorks
+  executables or libraries. Coverage is experimental and documented in
+  [docs/SW_FEATURE_COVERAGE.md](docs/SW_FEATURE_COVERAGE.md).
+* **COM export** is a separate route that requires the user's own SolidWorks installation
+  and an appropriate licence.
+* **Format research** uses controlled model-file comparisons and rebuild tests. Subsequent
+  Shell research also used targeted static analysis of SolidWorks program code to investigate
+  interoperability. This repository does not distribute SolidWorks executables, DLLs, SDKs
+  or decompiler output. See [docs/SLDPRT_FORMAT.md](docs/SLDPRT_FORMAT.md).
 * The user interface follows familiar CAD conventions (feature names, toolbars) so engineers
   feel at home; it contains no artwork or text taken from other products.

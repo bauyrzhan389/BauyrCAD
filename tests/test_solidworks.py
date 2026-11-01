@@ -12,9 +12,9 @@ from bauyrcad import solidworks
 from bauyrcad.api import Assembly, Part
 from bauyrcad.core import geometry, sldprt
 from bauyrcad.core.sketch import Constraint, constraints, solver
-from sw_support import (api_tree, assert_decoded_matches_api, assert_decoded_mates,
-                        assert_decoded_tree, assert_same_mass, decoded, needs_solidworks,
-                        rebuild_errors, reopen)
+from sw_support import (api_tree, assert_children_decoded, assert_decoded_matches_api,
+                        assert_decoded_mates, assert_decoded_tree, assert_same_mass, decoded,
+                        doc_steps, needs_solidworks, rebuild_errors, reopen)
 
 pytestmark = needs_solidworks
 
@@ -76,8 +76,8 @@ DEPTHS = {"plate": {"Boss-Extrude1": 10, "Cut-Extrude1": 4},
 def test_parts_rebuild_as_native_feature_trees(sw, tmp_path):
     for name, (part, feats) in parts().items():
         rep = solidworks.export_part(sw, part.doc, tmp_path / name)
-        assert rep.native, (name, rep.warnings)
-        assert rep.features == feats, name
+        assert rep.native and not rep.warnings, (name, rep.warnings)
+        assert doc_steps(part.doc) == rep.features == feats, name
         tol = 1e-4 if name == "curvy" else 1e-6
         assert rep.volume == pytest.approx(geometry.volume(part.doc.body), rel=tol), name
         # the saved file itself: exactly these steps, natively, each sketch absorbed by the
@@ -86,6 +86,7 @@ def test_parts_rebuild_as_native_feature_trees(sw, tmp_path):
         t = decoded(rep.path)
         for sk, op in zip(feats[::2], feats[1::2]):
             assert t[sk].parent == t[op].id, (name, sk, op)
+        assert_children_decoded(rep.path)
         for op, value in DEPTHS[name].items():
             assert sldprt.dim_value(t[op].dims["D1"]) == pytest.approx(value), (name, op)
         doc = reopen(sw, rep.path)
@@ -108,8 +109,9 @@ def test_revolve_with_external_and_ordinary_axis_lines(sw, tmp_path):
         reopened = reopen(sw, rep.path)
         assert solidworks._volume(sw, reopened) == pytest.approx(p.volume(), rel=1e-6)
         if rep.native:
+            assert not rep.warnings and rep.features == doc_steps(p.doc), rep.warnings
             assert "Revolve1" in [n for n, _, _ in api_tree(sw, reopened)]
-            assert_decoded_tree(rep.path, [(f, kind(f)) for f in rep.features], exact=True)
+            assert_decoded_tree(rep.path, [(f, kind(f)) for f in doc_steps(p.doc)], exact=True)
             assert_decoded_matches_api(sw, reopened, rep.path)
         else:
             assert any("imported as a solid body" in w for w in rep.warnings)
@@ -178,12 +180,19 @@ def applied_parts():
 
 def test_applied_features_rebuild_natively(sw, tmp_path):
     for name, (part, want) in applied_parts().items():
-        rep = solidworks.export_part(sw, part.doc, tmp_path / name)
-        assert rep.native, (name, rep.warnings)
+        rep = solidworks.export_part(sw, part.doc, tmp_path / name, require_native=True)
+        steps = doc_steps(part.doc)
+        assert rep.native and not rep.warnings and rep.features == steps, (name, rep.warnings)
         tol = {"loft": 1e-2, "spring": 1e-3}.get(name, 1e-6)  # blends / helices fit a bit differently
         assert rep.volume == pytest.approx(geometry.volume(part.doc.body), rel=tol), name
-        # every reported step is in the saved file, in order, natively, with the right type
-        assert_decoded_tree(rep.path, [(n, want.get(n)) for n in rep.features])
+        # every BauyrCAD step (from the document, not the exporter's report) is in the saved
+        # file, in order, natively, with the right type, and its absorbed sketches are found
+        assert_decoded_tree(rep.path, [(n, want.get(n)) for n in steps])
+        assert_children_decoded(rep.path)
+        if name == "loft":                  # both loft profiles and the sweep path absorbed
+            t = decoded(rep.path)
+            assert t["Loft1"].children == [t["Sketch1"].id, t["Sketch2"].id]
+            assert t["Sweep1"].children == [t["Sketch3"].id]
         doc = reopen(sw, rep.path)
         assert_decoded_matches_api(sw, doc, rep.path)
         types = {n: t for n, t, _ in api_tree(sw, doc)}
@@ -234,6 +243,8 @@ def test_imported_base_preserves_later_features(sw, tmp_path, fmt):
     assert (r[0] if isinstance(r, tuple) else r) and copy.exists()
     assert {f.name: f.suppressed for f in sldprt.feature_tree(copy)} == {
         n: n == names[4] for n in names}
+    t = decoded(copy)                       # KeyWords drops a suppressed feature's children
+    assert t[names[4]].children == [t[names[3]].id] and t[names[2]].children == [t[names[1]].id]
     assert_decoded_matches_api(sw, doc, copy)
     e.doc.regenerate()
     sw.close(doc)

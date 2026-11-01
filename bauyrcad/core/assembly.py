@@ -946,12 +946,17 @@ class Assembly:
         return geometry.compound(shapes)
 
     def export(self, path, fmt=None):
-        """STEP keeps the assembly structure (one product per part file, placed instances);
-        the other formats get the whole assembly as one compound."""
-        from .exchange import FORMATS, export, export_format_for, write_step_assembly
+        """STEP and Parasolid (.x_t) keep the assembly structure (one part per part file,
+        placed instances, names, colours), and so does a SolidWorks .SLDASM (written with
+        its .SLDPRT parts next to it, components fixed / floating as here); the other
+        formats get the whole assembly as one compound."""
+        from .exchange import FORMATS, SLDASM, export, export_format_for, write_step_assembly
         name = self.path.stem if self.path else "Assembly"
-        f = FORMATS[fmt] if fmt else export_format_for(path)
-        if not f.key.startswith("step"):
+        if fmt == SLDASM.key or (fmt is None and Path(path).suffix.lower() in SLDASM.extensions):
+            f = SLDASM
+        else:
+            f = FORMATS[fmt] if fmt else export_format_for(path)
+        if not f.key.startswith("step") and f.key not in ("xt", "sldasm"):
             export(self.world_shape(), path, f.key, name=name)
             return
         parts, index, instances = [], {}, []
@@ -962,5 +967,18 @@ class Assembly:
             if key not in index:
                 index[key] = len(parts)
                 parts.append((Path(c.source).stem, c.shape, c.color))
-            instances.append((index[key], c.name, c.pose.matrix))
+            instances.append((index[key], c.name, c.pose.matrix, c.fixed))
+        if f.key == "sldasm":             # SolidWorks: the parts once, next to the assembly
+            from . import parasolid, swfile
+            from .exchange import ExchangeError
+            try:
+                swfile.write_assembly(parts, instances, path, name=name)
+            except (swfile.SwFileError, parasolid.XtError) as e:
+                raise ExchangeError(f"SolidWorks assembly (.SLDASM) export: {e}") from e
+            return
+        instances = [(k, n, m) for k, n, m, _fixed in instances]
+        if f.key == "xt":                 # Parasolid: parts once, placed, named, coloured
+            from .exchange import write_xt_assembly
+            write_xt_assembly(path, parts, [(k, n, m) for k, n, m in instances], name=name)
+            return
         write_step_assembly(path, parts, instances, name=name, fmt=f.key)

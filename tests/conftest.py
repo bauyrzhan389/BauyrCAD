@@ -25,6 +25,21 @@ def sw():
 
 
 @pytest.fixture(autouse=True)
+def close_sw_documents(request):
+    """Close every SolidWorks document a test left open in the shared session, also when
+    it failed half-way: SolidWorks refuses to open a second file with the same title
+    (plate.SLDPRT in another folder), so a leaked document would fail later tests."""
+    if "sw" not in request.fixturenames:
+        yield
+        return
+    sw = request.getfixturevalue("sw")
+    before = list(sw._docs)
+    yield
+    from sw_support import close_new_documents
+    close_new_documents(sw, before)
+
+
+@pytest.fixture(autouse=True)
 def no_blocking_dialogs(monkeypatch):
     """A modal message box would hang an unattended test run - fail loudly instead."""
     try:

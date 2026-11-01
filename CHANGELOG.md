@@ -1,6 +1,204 @@
 # Changelog
 
 ## 0.4.0 (unreleased)
+- **Origin-anchored sketches offline**: explicit sketch-origin references remain constrained
+  on standard and supported reference planes, including shared profiles and several sketches.
+  Origin projection on model-face sketches remains unsupported and preserves the destination.
+- **Clockwise arcs offline**: concave profiles preserve arc orientation and editable radius
+  dimensions, including profiles containing complementary arcs.
+- **Clear command-line export failures**: unsupported offline exports return an explanatory
+  error and exit status 2, preserving existing destination files.
+- **Safe native feature names**: offline export rejects names that collide with built-in
+  SolidWorks features, including case-only duplicates, before changing the destination.
+- **Shared sketches offline**: one native sketch can drive multiple extrusions or revolves;
+  earlier sketches retain their original tree order. Supported reference planes work too.
+- **More native sketch relations offline**: horizontal/vertical point pairs, point-on-line,
+  equal circles, collinear lines, point symmetry and fixed geometry. Fixed lines/arcs also
+  fix their endpoints to preserve BauyrCAD's intent; stored fixed-point flags are retained.
+- **Offline reference planes**: offset, zero-offset/coincident and midplanes retain native
+  parent references and move their sketches/bodies when edited in SolidWorks. Supports
+  Front/Top/Right, chained planes, extrusion/revolve histories and unused planes. Angled,
+  three-point, face-based and flipped reference planes remain explicit unsupported cases.
+- **More sketch routes validated offline**: center slots, three-point centered rectangles,
+  circumscribed polygons, perimeter circles, center/three-point arcs, sketch fillets and
+  sketch chamfers retain native entities and supported design intent.
+- **Offline sketch design intent**: slots, centered/three-point rectangles, parallelograms
+  and regular polygons retain construction geometry, points and their supported relations.
+  Driving arc/circle radii join lengths and diameters; editing a slot radius or polygon
+  construction-circle diameter changes the native body. Equation bindings remain unsupported; origin anchoring is covered by the newer entry above.
+- **Broader offline face support**: end-cap sketches, reversed and mid-plane base
+  extrusions, face cuts (blind/through-all/both directions), and mid-plane face bosses.
+  Through-all cuts now accept the API default with no unused depth supplied. Added a
+  tracked inventory of all modelling, constraint and mate families for native export.
+- **Offline face-attached sketches**: a second blind boss on a planar side face of a
+  polygonal base extrusion exports with its editable sketch and native face attachment.
+  Covers slanted faces and Front/Top/Right bases; unsupported face histories still report
+  a reason rather than silently flattening the part.
+- **Offline SolidWorks export in the Windows app**: a dedicated editable-part menu command,
+  clearly separate from the installed-SolidWorks exporter. GUI feature-tree exports reject
+  unsupported models instead of silently producing an Imported body. Windows builds now
+  include all native/dimension templates and verify offline feature export in their self-test.
+- **Offline fillets and chamfers (M5 second family)**: a constant-radius fillet or
+  equal-distance chamfer after a forward blind polygonal extrusion, including multiple
+  edges and face selections on Front/Top/Right. Sizes and extrusion depth remain editable.
+  Longer histories, variable radii and asymmetric chamfers retain explicit fallback.
+  Also fixed COM equal-distance chamfers on nonperpendicular faces.
+- **Automatic offline sketch-dimension placement**: length and diameter labels now use
+  the profile bounds, outward offsets and spacing between labels instead of donor positions.
+- **Offline revolved bosses and cuts (M5 first family)**: standard planes, full/partial
+  angles, reverse and mid-plane, about a construction centerline in the profile sketch.
+  Supports mixed extrusion/revolve stacks and editable angles. SolidWorks gates cover
+  rebuilds, geometry, renamed features, diagonal axes, dimension edits and save/reopen.
+- **SolidWorks feature trees without SolidWorks (M4)**: `Part.export_solidworks_offline`,
+  `swfile.write_part(..., features=True)`, CLI `export --features`, and a GUI export format.
+  Supports independent sketch/extrude pairs on Front/Top/Right, blind/reverse/mid-plane
+  bosses, blind/reverse/mid-plane/through-all/both-directions cuts, and M3 sketch dimensions.
+  Unsupported parts fall back as a whole to Imported solids with a reason; strict mode
+  refuses the export. SolidWorks gates check volumes, bounds, edits and save/reopen.
+- **Driving sketch dimensions written without SolidWorks (M3 part 2)**:
+  `swtree.add_dimension` and `set_profile(..., dims=...)` write line lengths and circle
+  diameters with editable D1/D2 names. The archive reader now decodes the dimension donors
+  byte for byte and keeps the sketch reference separate from the dimension index.
+- `swfile.write_assembly` references an existing `.SLDPRT` next to the assembly (e.g. one saved by
+  SolidWorks, feature tree kept) instead of rewriting it, like a `.SLDASM` sub-assembly. Used to bring a
+  SolidWorks 2025 assembly back to SolidWorks 2024 (client V5).
+- `export_solidworks_tree` also takes an existing `.SLDASM` in the same folder (for example one saved
+  by SolidWorks) as a child and references it as it is, so cables or fixtures can be added around a
+  user's own assembly without rewriting it (client rev. D6).
+- **SolidWorks assemblies of sub-assemblies, written without SolidWorks**:
+  `bauyrcad.api.export_solidworks_tree("top.SLDASM", [(sub_asm, pose, fixed), ...])` writes each
+  sub-assembly as its own `.SLDASM` (with its parts) next to the top and the top as an assembly
+  whose components are those sub-assemblies (and any parts), marked as assemblies the way
+  SolidWorks marks them (document type 3 after the referenced file's stem in the model header).
+  Every level may hold up to 46 components, so a machine of any size goes in as a tree (the
+  gripper project rev. D5: 198 parts in 13 sub-assemblies). Not yet opened in SolidWorks by the
+  test suite (SolidWorks was not available): `tests/test_swfile_tree.py` checks the written
+  references, document types and placements. `asm.add(..., pose=4x4, color=(r, g, b))` places a
+  component by a full transform (e.g. one read from another CAD assembly) and colours it.
+- **Exact model of SolidWorks' feature archive (groundwork for native feature trees without
+  SolidWorks)**: `bauyrcad.core.mfc` reads `Contents/Config-0` and `Config-0-ResolvedFeatures`
+  object by object (MFC load map, per-class field layouts) and writes them back byte for byte,
+  renumbering every object reference from object identity. Covers the default folders and
+  planes, sketches of lines and arcs with their relations, and blind boss extrudes (rectangle,
+  triangle, square and circle sketches of SolidWorks 2024 parts), and also Imported bodies
+  (STEP opened in SolidWorks, BauyrCAD's own seed), sketch-only parts and the extrude form
+  other tools save; 80 parts on this PC read and write back byte for byte. Not user-visible yet.
+- `bauyrcad.core.swtree.transplant` adds features to a SolidWorks part's tree without
+  SolidWorks (a sketch and an Instant3D boss copied from a SolidWorks-made donor, every
+  reference and counter renumbered): SolidWorks 2024 opens the result with the new features,
+  the exact volume, a clean rebuild and editable dimensions. Groundwork for native trees.
+  `swtree.set_profile` writes a sketch's lines, arcs and circles (several loops, holes,
+  horizontal / vertical relations) from plain geometry; SolidWorks rebuilds the extrude from
+  them to BauyrCAD's volume.
+- **SolidWorks 2024 assemblies (`.SLDASM`) written by BauyrCAD itself, no SolidWorks
+  needed**: `asm.export("a.SLDASM")` (and File > Export in the assembly window) writes the
+  assembly with each part once as a `.SLDPRT` next to it (exact solid as an Imported body),
+  components placed exactly and fixed / floating as in BauyrCAD, a part used twice shared.
+  File > Export to SolidWorks in the assembly window offers it first (then `.x_t`) when
+  SolidWorks is not installed. Up to 46 components; no mates or colours yet (those need
+  SolidWorks: Export to SolidWorks). SolidWorks 2024 opens the test assembly with every
+  component where it puts the same assembly's STEP, a clean rebuild, and saves it again.
+- **SolidWorks 2024 parts (`.SLDPRT`) written by BauyrCAD itself, no SolidWorks needed**:
+  `part.export("p.SLDPRT")`, the CLI and File > Export write a SolidWorks part whose tree is
+  one Imported feature holding the exact solid (as SolidWorks itself stores an imported body).
+  File > Export to SolidWorks offers it when SolidWorks is not installed. SolidWorks 2024 opens
+  15 test parts (analytic, B-spline, tolerant edges, a cavity, two solids) with the exact body,
+  a clean rebuild and What's Wrong, and saves them again. The editable feature tree still
+  needs SolidWorks (Export to SolidWorks).
+- **Parasolid export (`.x_t`) of assemblies, with names and colours**: `asm.export("a.x_t")`
+  (and File > Export to SolidWorks in the assembly window when SolidWorks is not installed)
+  writes each part once and places it by its components (a part used twice is shared, as in
+  SolidWorks), with the assembly, part and component names and each part's colour on its
+  faces. SolidWorks 2024 opens it as an assembly with the components where the STEP puts
+  them and the colours exact (through STEP it shows them lightened). Part exports carry the
+  part name.
+- **Parasolid export (`.x_t`): tolerant edges, inner voids and several bodies.** An edge
+  OpenCASCADE leaves further from its faces than Parasolid's 1e-5 mm (a shell of a spline
+  part) is written as a Parasolid tolerant edge, with its curve on each face (an SP-curve)
+  and tolerant vertices, so such parts export instead of being refused. A closed void inside
+  a solid is its own void region. Several solids are written as SolidWorks writes a
+  multi-body part (an assembly of the bodies, which SolidWorks opens as an assembly). Offset
+  surfaces are approximated to 1e-7 mm and every converted surface is checked by projection.
+  28 parts and a two-body part open in SolidWorks 2024 with no faults.
+- **Parasolid export (`.x_t`) now writes B-spline curves and surfaces**: splines, extruded
+  and revolved splines, lofts, sweeps (open, closed, helical springs) and sketch text export
+  too. Closed B-surfaces are written periodic (no seam edges, as Parasolid has them: a sweep
+  along a closed spline is one face with no edges), and knots where a sweep's parameter lines
+  turn are split as SolidWorks does on import, so Parasolid sees a smooth surface. Seven such
+  parts open in SolidWorks 2024 with no faults, SolidWorks' own face and edge counts, and the
+  volume it measures for them through STEP. A part whose edges lie further than 1e-5 mm from
+  their faces (a shell of a spline part) reports it (tolerant edges come next; use STEP).
+- **Parasolid export (`.x_t`), written by BauyrCAD itself**: File > Export (and
+  `part.export("part.x_t")`, the CLI `export`) writes a Parasolid transmit file that
+  SolidWorks, NX, Solid Edge and Onshape open as an exact solid, with no SolidWorks needed.
+  File > Export to SolidWorks offers it when SolidWorks is not installed. This first step
+  covers one solid with plane, cylinder, cone, sphere and torus faces and line, circle and
+  ellipse edges (extrudes, revolves, cuts, fillets, chamfers, shells, Hole Wizard holes,
+  patterns); 19 such parts open in SolidWorks 2024 with no faults, Parasolid's own face and
+  edge counts and the volume SolidWorks measures for them through STEP. Splines, lofts,
+  sweeps, text, several bodies and assemblies come next (they report it; use STEP).
+- **Scripting API: `part.sketch("front")` references the Front Plane** (stored as the
+  standard plane, as the GUI does). The SolidWorks export puts such a sketch on the Front
+  Plane even when an earlier reference plane (e.g. a mid plane between two faces) lies there;
+  before, it was parented to that plane and moved with it when the model was edited in
+  SolidWorks. Explicit `SketchPlane`s also prefer the standard plane, and never reuse a
+  transferred reference plane.
+- **SolidWorks export: narrow spline-bounded features export strictly** (D8: the spline's
+  shape difference is a note). BauyrCAD's volume is now measured exactly on spline faces
+  (split at the knots: the whole-face integration was ~0.01 mm³ off per spline, the
+  adaptive one several %), and a spline step has an allowance along the spline (1 µm times
+  its free-form face area). A 0.3 mm spline strip was refused; it now exports with a note.
+- **SolidWorks export: a Point placed on a line end or circle centre** (the GUI's Point
+  tool snapped to it) is exported as a SolidWorks point tied with a checked Coincident.
+- **SolidWorks export never closes the user's SolidWorks**: when the running SolidWorks
+  processes cannot be listed, the export no longer assumes the instance is its own, so it
+  never hides it, closes its documents unsaved or exits it.
+- **SolidWorks export: tighter, position-independent step check**: each step's change of
+  volume and of first moment is now judged against the step itself, not the whole body.
+  SolidWorks measures at its Higher mass-property accuracy (it agrees with OpenCASCADE to
+  ~1e-9), the measurement floor dropped from 2e-6 to 1e-8 of the body (plus any difference
+  an earlier loft / spline already left, and OpenCASCADE's own integration uncertainty on
+  B-spline faces, measured per step: 0 on analytic faces), and the first moment is taken about the step's
+  neighbourhood instead of the world origin. A small boss patterned the wrong way or a
+  chamfer with its distances swapped on a 200 x 200 mm plate is now rejected (it was
+  accepted), and a loft or sweep modelled 1 m from the origin exports as it does at the
+  origin (it was refused).
+- **SolidWorks export: helices run where BauyrCAD has them**: a helix has no volume, so its
+  curve is now compared with BauyrCAD's (every point on it, the same end points). The
+  direction about a negative axis (`axis="-y"`), the hand, which SolidWorks reads about its
+  sketch normal, and the start angle, which SolidWorks counts from its own zero (it was
+  90 deg off about Y and X), are derived and checked. Before, a helix about `-y` was saved
+  growing +Y, and any helix about Y or X started a quarter turn early.
+- **SolidWorks export pre-check: revolves about a line in another sketch or an ordinary
+  line outside the profile** are refused before SolidWorks starts, with the fix (draw the
+  axis as a centerline in the profile sketch). SolidWorks made no feature for them.
+- **Offline SolidWorks file check (`sldprt.feature_tree`) is more reliable**: a class
+  reference now names the class whose header comes in the right place in the file, not the
+  one most often seen with that KeyWords type, so later boss extrudes read as `Boss`,
+  suppressed Instant3D bosses and cuts as `ICE`, and no two class indices share a class.
+  Absorbed sketches are found for every loft profile, a sweep's path and features
+  suppressed in the active configuration; `SwFeature.unlinked` counts any it still can't
+  identify. The documented check builds the expected steps from the part itself
+  (`[f.name for f in part.doc.features]`), not from the export report.
+- **SolidWorks export: reference geometry**: every reference plane, axis, point and curve
+  becomes the native SolidWorks feature of the same kind and name, with BauyrCAD's
+  references, and later features select it by its BauyrCAD id. Planes: offset (either
+  side, 0 = coincident) from a plane or face, mid plane, at angle about an axis, edge,
+  reference axis or sketch line, through three points, normal to an axis / edge through a
+  point. Axes: cylinder / cone face, a planar face's normal, a straight or circular edge,
+  two planes, two points, point + direction. Points: coordinates, arc centre, face
+  centre. Curves: Curve Through XYZ Points (open and closed) and polylines (3D sketch).
+  Each one is read back in SolidWorks (plane place and normal, axis line, point, curve
+  points). Patterns can use a reference axis or a circular edge as their axis. These
+  types no longer block the GUI export; what SolidWorks can't define (an 'At angle'
+  plane whose axis is not parallel to its base, a planar face's normal as its rotation
+  axis) is refused before SolidWorks starts.
+- **Curve Through XYZ Points**: the curve is now the cubic spline SolidWorks makes from the
+  same points (chord-length parameters, natural ends; periodic when closed), so the two
+  programs give the same curve and sweep. Curves in existing parts change shape slightly
+  between their points.
+- **API**: `part.plane(sketch, ...)` (and mirror / draft / hole planes given as a sketch)
+  now references the sketch's standard or reference plane instead of a copy of its plane.
 - **SolidWorks export: sketch relations and dimensions**: every relation arrives as the
   SolidWorks relation of the same kind and each one is checked in SolidWorks (the sketch
   must gain that relation type): coincident (point-point, and a point on a line, arc,

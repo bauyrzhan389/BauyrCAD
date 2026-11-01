@@ -11,7 +11,10 @@ bauyrcad/
 │   │   ├── builders.py   drawing tools with automatic relations (rectangles, slots, ...)
 │   │   ├── ops.py        trim, extend, fillet, chamfer, offset, mirror, transforms, patterns
 │   │   └── profiles.py   closed loops → regions with holes for features
-│   ├── exchange.py       STEP/IGES/BREP/STL/OBJ/glTF/VRML export, STEP/IGES/BREP import
+│   ├── exchange.py       STEP/IGES/Parasolid/BREP/STL/OBJ/glTF/VRML export, STEP/IGES/BREP import
+│   ├── xt_brep.py        OCC solid -> Parasolid's model (seams, poles, ring edges, senses)
+│   ├── parasolid.py      Parasolid .x_t / .x_b writer, no OCC: schema 12006 nodes, checks
+│   ├── swfile.py         SolidWorks 2024 .SLDPRT / .SLDASM writer (seeds + Imported body), no OCC
 │   ├── geometry.py       ALL OpenCASCADE calls: faces, prisms, booleans, tessellation, queries
 │   ├── step_io.py        STEP read/write (OCC STEPControl)
 │   ├── features.py       Parametric features: Sketch, Extrude (boss/cut), Import STEP
@@ -223,5 +226,5 @@ Body  ─► mesher.mesh_shape (Gmsh, BREP file) ─► nodes, tet10 elements, f
 
 * Units: mm, N, MPa (so E in MPa, stress in MPa, displacement in mm). Density is kg/m³, for mass display only.
 * Coordinates: SolidWorks-style with Y up. Front = XY (+Z normal), Top = XZ (+Y), Right = YZ (+X).
-* All OCC types stay inside `core/geometry.py` and `core/step_io.py`. Everything else passes numpy
-  arrays and plain data. That keeps a kernel upgrade (OCCT 8) or swap contained.
+* All OCC types stay inside `core/geometry.py` and `core/step_io.py` (plus `modeling.py`,
+  `exchange.py` and `xt_brep.py`). Everything else passes numpy arrays and plain data. That keeps a kernel upgrade (OCCT 8) or swap contained.

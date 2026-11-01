@@ -48,7 +48,10 @@ convenient for both of us with every project.
    `asm.export_solidworks(folder)` (SolidWorks must be installed on this PC). Check the report:
    `native` (feature tree) vs solid body, and that every mate is `ok`. Never close or edit a
    SolidWorks session the user has open (the export only touches its own documents; the
-   SolidWorks tests skip themselves while SolidWorks is running).
+   SolidWorks tests skip themselves while SolidWorks is running). A hidden SolidWorks left by a
+   crashed COM session is ended with
+   `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/end_hidden_solidworks.ps1`
+   (only windowless, COM-started instances; allowed in the local settings).
 9. **Assemblies**: save each part (`projects/<name>/parts/*.bcad`), then build
    `projects/<name>/assembly.py` with `bauyrcad.api.Assembly` (mates by `comp.face(...)` in
    part coordinates), check `asm.dof()` and `asm.render(...)`, and save `<name>.bcasm` + a STEP
@@ -86,6 +89,6 @@ faster path for the API), implement it properly rather than working around it:
 - SolidWorks naming and behaviour for UI features. AutoCAD-style aliases for the command line
   (`MainWindow._register_commands`).
 - All OCC calls stay in `core/geometry.py`, `core/modeling.py` (feature operations),
-  `core/exchange.py`, `core/step_io.py`.
+  `core/exchange.py`, `core/step_io.py`, `core/xt_brep.py` (B-rep -> Parasolid model).
 - Licensing: own code is MIT. Gmsh is GPL, so avoid adding more copyleft dependencies
   (this is why the sketch solver is in-house and not SolveSpace).

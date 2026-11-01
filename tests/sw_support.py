@@ -4,7 +4,10 @@ per-family tests/test_sw_<family>.py files).
 * ``needs_solidworks``: module mark - skip unless SolidWorks is installed and NOT already
   running (a running SolidWorks belongs to the user; set BAUYRCAD_SW_TESTS=1 to force).
 * ``sw`` fixture (tests/conftest.py, from :func:`sw_session`): ONE private SolidWorks
-  instance for the whole test run, started by the first test that asks for it.
+  instance for the whole test run, started by the first test that asks for it; the
+  documents a test opens are closed when it ends, pass or fail (close_new_documents).
+* doc_steps: the BauyrCAD steps a saved file must hold - build expected trees from the
+  Document, never from the exporter's own report.features.
 * reopen / api_tree / user_api_tree: read the saved file back through the SolidWorks API.
 * assert_decoded_tree / assert_decoded_matches_api / assert_decoded_mates: decode the saved
   file offline with bauyrcad.core.sldprt, so a native tree is proven from the file itself,
@@ -23,6 +26,9 @@ per-family tests/test_sw_<family>.py files).
 * relation_kinds / sketch_dims / assert_sketch_points: every relation of a saved sketch by
   swConstraintType_e, its display dimensions (kind, value, driven state, text position), and
   its points where BauyrCAD's are (relations and dimensions moved nothing).
+* plane_def / axis_def / point_def / curve_points: reference geometry read back (definition
+  type, constraints, distance / angle, what it references, and its geometry: plane origin and
+  normal, axis line, point position, Curve Through XYZ Points' points).
 """
 from __future__ import annotations
 
@@ -61,13 +67,27 @@ def sw_session():
 
 # ---- reading the saved file back through SolidWorks ------------------------------------
 def reopen(sw, path):
-    """Open a saved .SLDPRT / .SLDASM in the test session (closed with the session)."""
+    """Open a saved .SLDPRT / .SLDASM in the test session (closed when the test ends)."""
     kind = 1 if str(path).upper().endswith(".SLDPRT") else 2
     r = sw.sw.OpenDoc6(str(path), kind, 1, "", 0, 0)
     doc = sw.T(r[0] if isinstance(r, tuple) else r, "IModelDoc2")
     assert doc is not None, f"SolidWorks could not open {path} ({r})"
     sw._docs.append(doc)
     return doc
+
+
+def close_new_documents(sw, before):
+    """Close the session's documents that are not in ``before`` (the per-test cleanup of
+    tests/conftest.py, so one failed test can't leave a same-titled file open for the next)."""
+    for doc in [d for d in sw._docs if not any(d is b for b in before)]:
+        sw.close(doc)
+
+
+def doc_steps(doc) -> list:
+    """Every BauyrCAD step of a Document, in order: what a saved file must hold. Expected
+    trees are built from this, never from the exporter's own report.features (a step the
+    exporter left out would then pass unnoticed)."""
+    return [f.name for f in doc.features]
 
 
 def api_tree(sw, doc) -> list:
@@ -265,6 +285,7 @@ def check_saved_part(sw, rep, shape, steps, helpers=(), rel=1e-6):
     centre of mass match BauyrCAD (shape None: no solid). Returns the reopened document."""
     extra = list(rep.helpers) + [n for feats in rep.steps.values() for n in feats[1:]]
     assert_decoded_tree(rep.path, steps, helpers=list(helpers) + extra, exact=True)
+    assert_children_decoded(rep.path)
     doc = reopen(sw, rep.path)
     assert_decoded_matches_api(sw, doc, rep.path)
     assert rebuild_errors(sw, doc) == []
@@ -277,11 +298,11 @@ def check_saved_part(sw, rep, shape, steps, helpers=(), rel=1e-6):
 
 
 def assert_same_mass(sw, doc, shape, rel=1e-6):
-    """Volume and centre of mass of the SolidWorks document match a BauyrCAD shape."""
-    v = geometry.volume(shape)
+    """Volume and centre of mass of the SolidWorks document match a BauyrCAD shape (measured
+    accurately: B-spline faces split at their knots, geometry.accurate_mass_properties)."""
+    (v, c), _ = geometry.accurate_mass_properties(shape)
     assert solidworks._volume(sw, doc) == pytest.approx(v, rel=rel)
     size = max(float(np.linalg.norm(np.subtract(*geometry.bounding_box(shape)))), 1.0)
-    c = geometry.center_of_mass(shape)
     assert np.allclose(solidworks._center(sw, doc), c, atol=max(rel, 1e-6) * size * 10)
 
 
@@ -291,6 +312,13 @@ def assert_decoded_tree(path, expected, helpers=(), exact=False, config=0):
     sldprt.tree_mismatches for the forms of ``expected``)."""
     problems = sldprt.tree_mismatches(path, expected, config=config, helpers=helpers, exact=exact)
     assert not problems, "\n".join([f"decoded tree of {path}:"] + problems)
+
+
+def assert_children_decoded(path, config=0):
+    """Every absorbed sketch the saved file declares was identified (SwFeature.unlinked),
+    so parents / children and an exact tree check can be trusted."""
+    missed = [(f.name, f.unlinked) for f in sldprt.feature_tree(path, config) if f.unlinked]
+    assert not missed, f"absorbed children not identified in {path}: {missed}"
 
 
 def decoded(path, config=0) -> dict:
@@ -357,3 +385,71 @@ def assert_decoded_mates(path, expected=None, sw=None, doc=None):
         if "suppressed" in want:
             assert m.suppressed is bool(want["suppressed"]), m.name
     return ms
+
+
+# ---- reference geometry read back ---------------------------------------------------------
+def _ref_name(sw, obj):
+    """The feature name of a selected reference ('entity' for a face / edge / vertex / point:
+    SolidWorks hands some of those back as plain values)."""
+    import pythoncom
+    if obj is None or isinstance(obj, (tuple, list, float, int)):
+        return "entity"
+    try:
+        raw = obj._oleobj_ if hasattr(obj, "_oleobj_") else obj
+        raw.QueryInterface(sw._mod.IFeature.CLSID, pythoncom.IID_IDispatch)
+    except Exception:  # noqa: BLE001 - not a feature
+        return "entity"
+    return sw.T(obj, "IFeature").Name
+
+
+def plane_def(sw, doc, feat) -> dict:
+    """IRefPlaneFeatureData + IRefPlane.Transform: {type (swRefPlaneType_e), constraints
+    [swRefPlaneReferenceConstraints_e of each reference], distance (mm), angle (deg), refs
+    (names of referenced features, 'entity' otherwise), origin (mm), normal}."""
+    d = definition(sw, feat, "IRefPlaneFeatureData")
+    xf = sw.T(sw.T(feat.GetSpecificFeature2(), "IRefPlane").Transform, "IMathTransform")
+    a = np.array(xf.ArrayData)
+    cons = [d.Constraint(i) for i in range(3)]
+    d.AccessSelections(doc, None)
+    try:
+        refs = [_ref_name(sw, d.Reference(i)) for i in range(3) if cons[i]]
+    finally:
+        d.ReleaseSelectionAccess()
+    return {"type": d.Type, "constraints": [c for c in cons if c], "distance": d.Distance * 1e3,
+            "angle": math.degrees(d.Angle), "refs": refs, "origin": a[9:12] * 1e3,
+            "normal": a[6:9]}
+
+
+def axis_def(sw, doc, feat) -> dict:
+    """IRefAxisFeatureData + IRefAxis.GetRefAxisParams: {type (swRefAxisType_e), refs
+    (number of references), point (mm), direction}."""
+    d = definition(sw, feat, "IRefAxisFeatureData")
+    prm = np.array(sw.T(feat.GetSpecificFeature2(), "IRefAxis").GetRefAxisParams()) * 1e3
+    typ = d.Type
+    d.AccessSelections(doc, None)
+    try:
+        r = d.GetSelections()
+    finally:
+        d.ReleaseSelectionAccess()
+    ents = r[0] if isinstance(r, tuple) and len(r) == 2 and isinstance(r[0], (tuple, list)) else r
+    return {"type": typ, "refs": len(ents or ()), "point": prm[:3],
+            "direction": (prm[3:6] - prm[:3]) / np.linalg.norm(prm[3:6] - prm[:3])}
+
+
+def point_def(sw, doc, feat) -> dict:
+    """IRefPointFeatureData + IRefPoint.GetRefPoint: {type (swRefPointType_e), xyz (mm)}."""
+    d = definition(sw, feat, "IRefPointFeatureData")
+    rp = sw.T(feat.GetSpecificFeature2(), "IRefPoint")
+    return {"type": d.Type, "xyz": np.array(sw.T(rp.GetRefPoint(), "IMathPoint").ArrayData[:3]) * 1e3}
+
+
+def curve_points(sw, feat):
+    """The points (mm, n x 3) of a Curve Through XYZ Points (IFreePointCurveFeatureData)."""
+    d = definition(sw, feat, "IFreePointCurveFeatureData")
+    return np.array(d.PointArray).reshape(-1, 3) * 1e3
+
+
+def same_line(p, d, q, e, tol=1e-6) -> bool:
+    d, e = np.asarray(d, float) / np.linalg.norm(d), np.asarray(e, float) / np.linalg.norm(e)
+    return (np.linalg.norm(np.cross(d, e)) < 1e-9
+            and np.linalg.norm(np.cross(np.asarray(q, float) - np.asarray(p, float), d)) < tol)

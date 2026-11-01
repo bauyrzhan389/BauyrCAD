@@ -446,6 +446,105 @@ def test_real_tree_mismatches_catch_renamed_steps_and_dumb_solids():
     assert (t["Sketch1"].parent, t["Sketch2"].parent, t["Imported1"].dumb_solid) == (33, 47, True)
 
 
+def _keywords_with(monkeypatch, change):
+    """Make feature_tree see KeyWords items changed by ``change(item) -> item``."""
+    import dataclasses
+    real = sldprt.keywords
+    monkeypatch.setattr(sldprt, "keywords", lambda src: {
+        i: change(dataclasses.replace(v, dims=dict(v.dims), children=list(v.children)))
+        for i, v in real(src).items()})
+
+
+@needs_data
+def test_real_class_reference_follows_header_order_not_corpus_frequency(monkeypatch):
+    """A class index names ONE class, numbered in the order of the class headers. Suppressed
+    Instant3D features carry a KeyWords Type ('Boss-Extrude'), which in other files goes with
+    moExtrusion_c far more often than with moICE_c; the reference still names the ICE header
+    that comes next in the stream (review of WP01, 2026-10-18)."""
+    path = DATA / "suppressed.SLDPRT"
+
+    def boss(item):
+        if item.id == 60:                               # Cut-Extrude1, a class reference
+            item.type = "Boss-Extrude"
+        return item
+    _keywords_with(monkeypatch, boss)
+    for cfg in (0, 1):
+        t = {f.name: f for f in sldprt.feature_tree(path, cfg)}
+        assert (t["Cut-Extrude1"].mfc_class, t["Cut-Extrude1"].resolved_by) == ("moICE_c", "keywords")
+    assert sldprt.tree_mismatches(path, [("Boss-Extrude2", "ICE"), ("Cut-Extrude1", "ICE")]) == []
+
+
+@needs_data
+def test_real_absorbed_sketches_of_lofts_sweeps_and_suppressed_owners():
+    """Absorbed sketches stored before their owner are back references to MFC object
+    indices: every profile of a loft, a sweep's path, and the sketches of features suppressed
+    in the active configuration (KeyWords lists no children for those) are linked, and
+    nothing is left unidentified."""
+    def tree(name, cfg=0):
+        return {f.name: f for f in sldprt.feature_tree(DATA / name, cfg)}
+    loft = tree("loft.SLDPRT")              # Sketch1, Plane1, Sketch2, Loft1, Sketch3, Sweep1
+    assert loft["Loft1"].children == [loft["Sketch1"].id, loft["Sketch2"].id]
+    assert loft["Sketch1"].parent == loft["Sketch2"].parent == loft["Loft1"].id
+    assert loft["Sweep1"].children == [loft["Sketch3"].id]
+    for cfg in (0, 1):                      # Boss-Extrude2 suppressed in Default, Cut-Extrude1 in Alt
+        t = tree("suppressed.SLDPRT", cfg)
+        assert t["Sketch4"].parent == t["Boss-Extrude2"].id, cfg
+        assert t["Sketch5"].parent == t["Cut-Extrude1"].id, cfg
+    t = tree("imported_suppressed.SLDPRT")  # Cut-Extrude1 suppressed
+    assert t["Cut-Extrude1"].suppressed and t["Cut-Extrude1"].children == [t["Sketch2"].id]
+    for name in ("loft.SLDPRT", "suppressed.SLDPRT", "imported_suppressed.SLDPRT",
+                 "features.SLDPRT", "imported.SLDPRT", "shaft.SLDPRT", "sketch_helpers.SLDPRT"):
+        assert all(f.unlinked == 0 for f in tree(name).values()), name
+
+
+@needs_data
+def test_real_back_references_alone_find_the_keywords_children(monkeypatch):
+    """With KeyWords' DissectableChildren hidden, the back-reference links alone give the
+    same absorbed sketches."""
+    names = ("features.SLDPRT", "imported.SLDPRT", "shaft.SLDPRT", "sketch_helpers.SLDPRT",
+             "suppressed.SLDPRT", "loft.SLDPRT", "imported_suppressed.SLDPRT")
+    want = {n: [(f.name, f.parent, f.unlinked) for f in sldprt.feature_tree(DATA / n)] for n in names}
+
+    def hide(item):
+        item.children = []
+        return item
+    _keywords_with(monkeypatch, hide)
+    for n in names:
+        assert [(f.name, f.parent, f.unlinked) for f in sldprt.feature_tree(DATA / n)] == want[n], n
+
+
+SAMPLES = Path(r"C:\Users\Public\Documents\SOLIDWORKS\SOLIDWORKS 2024\samples")
+
+
+@pytest.mark.skipif(not SAMPLES.is_dir(), reason="SolidWorks 2024 sample files not installed")
+def test_sample_class_references_match_the_3dexperience_store():
+    """Boss extrudes after the base feature are moBoss_c, as the 3DExperience store of the
+    same file says, not the far more frequent moExtrusion_c; and no two class indices of a
+    stream resolve to the same class."""
+    files = {SAMPLES / "tutorial" / "advdrawings" / "switch top plate.sldprt":
+             {"tall screw bosses": "Boss", "lone boss": "Boss"},
+             SAMPLES / "tutorial" / "advdrawings" / "gear- caddy.sldprt": {"short screw boss": "Boss"},
+             SAMPLES / "learn" / "Mouse" / "Bottom Housing.SLDPRT": {}}
+    for path, want in files.items():
+        if not path.is_file():
+            continue
+        sec = sldprt.read_sections(path)
+        tree = sldprt.feature_tree(sec)
+        t = {f.name: f for f in tree}
+        assert {n: t[n].type_name for n in want} == want, path.name
+        docs = {sldprt._last(d.get("id")): sldprt._last(d.get("class"))
+                for d in sldprt._config_docs(sldprt.exchange_docs(sec), 0) if isinstance(d, dict)}
+        for f in tree:
+            if docs.get(f.id) and f.resolved_by != "mfc-new":
+                assert f.mfc_class == docs[f.id], (path.name, f.name)
+        b = sec["Contents/Config-0-ResolvedFeatures"]
+        classes = sldprt._new_classes(b)
+        recs = [r for r in sldprt._records(b, classes) if r.id != sldprt._NO_ID]
+        kmap = sldprt._resolve_classes(recs, sldprt.keywords(sec), b, classes)
+        named = [c for c, _ in kmap.values() if c]
+        assert len(named) == len(set(named)), path.name
+
+
 @needs_data
 def test_real_revolve_dimensions():
     t = {f.name: f for f in sldprt.feature_tree(DATA / "shaft.SLDPRT")}

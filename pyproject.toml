@@ -36,7 +36,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pyinstaller>=6.5"]
+# parasolid-kit: an independent .x_t reader for the export tests. Not "parasolid-kit[occt]":
+# that pulls cadquery-ocp-novtk, which overwrites the OCP package without VTK
+dev = ["pytest>=8", "pyinstaller>=6.5", "parasolid-kit>=0.3.7"]
 fast = []                      # kept for old install commands; pypardiso is now a default
 
 [project.gui-scripts]
@@ -44,6 +46,9 @@ bauyrcad = "bauyrcad.app:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "bauyrcad.__version__" }
+
+[tool.setuptools.package-data]
+bauyrcad = ["data/sw_seeds/*.SLDPRT", "data/sw_seeds/native/*.SLDPRT", "data/sw_seeds/asm/*.SLDASM"]
 
 [tool.setuptools.packages.find]
 include = ["bauyrcad*"]

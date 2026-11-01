@@ -1028,6 +1028,39 @@ class AssemblyWindow(QMainWindow):
         self.status(f"Saved {path}")
         return True
 
+    def _export_parasolid_instead(self, path=None):
+        """No SolidWorks here to build the files with feature trees and mates: BauyrCAD
+        writes a .SLDASM itself, its parts (.SLDPRT, exact solids as Imported bodies) next to
+        it, or a Parasolid .x_t of the assembly."""
+        from ..core import exchange
+        if QMessageBox.question(
+                self, "Export to SolidWorks",
+                "SolidWorks is not installed on this PC, so it cannot build the .SLDASM and "
+                ".SLDPRT files with feature trees and mates.\n\nExport a SolidWorks assembly "
+                "(.SLDASM) with its parts as exact solids instead (or a Parasolid .x_t)? BauyrCAD "
+                "writes it itself; the parts are saved next to the assembly, the components "
+                "placed and fixed / floating as here.") != QMessageBox.Yes:
+            return None
+        formats = [exchange.SLDASM, exchange.FORMATS["xt"]]
+        if path is None or Path(path).suffix.lower() not in (".sldasm", ".x_t"):
+            stem = self.asm.path.stem if self.asm.path else "Assembly1"
+            folder = self.asm.path.parent if self.asm.path else Path.home()
+            path, chosen = QFileDialog.getSaveFileName(self, "Export to SolidWorks",
+                                                       str(folder / f"{stem}.SLDASM"),
+                                                       ";;".join(f.filter for f in formats))
+            if not path:
+                return None
+            if Path(path).suffix.lower() not in (".sldasm", ".x_t"):
+                fmt = next((f for f in formats if f.filter == chosen), formats[0])
+                path += ".SLDASM" if fmt is exchange.SLDASM else fmt.extensions[0]
+        key = "sldasm" if Path(path).suffix.lower() == ".sldasm" else "xt"
+        try:
+            self.asm.export(path, key)
+        except Exception as e:  # noqa: BLE001 - shown to the user
+            QMessageBox.critical(self, "Export", f"Could not export {path}:\n\n{e}")
+            return None
+        return path
+
     def export_solidworks(self, folder=None):
         """Native SolidWorks assembly with its parts, floating components and mates."""
         if isinstance(folder, bool):  # QAction.triggered supplies its checked state
@@ -1036,10 +1069,7 @@ class AssemblyWindow(QMainWindow):
         if not any(c.shape is not None for c in self.asm.components):
             return None
         if not solidworks.available():
-            QMessageBox.warning(self, "Export to SolidWorks",
-                                "SolidWorks is not installed on this PC (it builds the files). "
-                                "Use Export STEP instead.")
-            return None
+            return self._export_parasolid_instead(folder)
         if self.dirty or self.asm.path is None:
             r = QMessageBox.question(self, "Export to SolidWorks",
                                      "Save the assembly first (the export reads the part files)?",
@@ -1083,13 +1113,15 @@ class AssemblyWindow(QMainWindow):
         if not self.asm.components:
             return
         stem = self.asm.path.stem if self.asm.path else "Assembly1"
-        filters = ";;".join(f.filter for f in exchange.EXPORT_FORMATS)
+        formats = exchange.ASSEMBLY_EXPORT_FORMATS
+        filters = ";;".join(f.filter for f in formats)
         folder = self.asm.path.parent if self.asm.path else Path.home()
         path, chosen = QFileDialog.getSaveFileName(self, "Export Assembly", str(folder / f"{stem}.step"),
                                                    filters)
         if not path:
             return
-        fmt = next((f for f in exchange.EXPORT_FORMATS if f.filter == chosen), None) \
+        fmt = next((f for f in formats if f.filter == chosen), None) \
+            or next((f for f in formats if Path(path).suffix.lower() in f.extensions), None) \
             or exchange.export_format_for(path)
         if Path(path).suffix.lower() not in fmt.extensions:
             path += fmt.extensions[0]

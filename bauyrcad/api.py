@@ -513,6 +513,7 @@ class Part:
             pl = _PLANES.get(str(plane).lower()) or REFERENCE_PLANES.get(plane)
             if pl is None:
                 raise ApiError(f"Unknown plane {plane!r}")
+            spec = {"type": "std", "name": pl.name}      # it references that plane, as in the GUI
         f = self.doc.add_feature(SketchFeature(pl, plane_spec=spec))
         self._dirty = True
         return Sketch(self, f)
@@ -879,6 +880,16 @@ class Part:
         if getattr(plane, "TYPE", None) == "ref_plane":
             return {"type": "feature", "id": plane.id}
         if isinstance(plane, Sketch):
+            # the sketch's own plane: the standard / reference plane it sits on (so the new
+            # feature references it as a SolidWorks user would), else its plane as numbers
+            spec = plane.feature.plane_spec or {}
+            if spec.get("type") in ("std", "feature"):
+                return dict(spec)
+            pl = plane.feature.plane
+            for name, ref in REFERENCE_PLANES.items():
+                if (np.allclose(pl.origin, ref.origin, atol=1e-12) and np.allclose(pl.normal, ref.normal, atol=1e-12)
+                        and np.allclose(pl.xdir, ref.xdir, atol=1e-12)):
+                    return {"type": "std", "name": name}
             return {"type": "explicit", "plane": plane.plane.to_dict()}
         if isinstance(plane, _SP):
             return {"type": "explicit", "plane": plane.to_dict()}
@@ -1093,10 +1104,15 @@ class Part:
         self.doc.save(path)
         return path
 
-    def export(self, path, fmt=None):
+    def export(self, path, fmt=None, *, features=False, require_native=False):
         self._ensure_built()
-        self.doc.export(path, fmt)
+        self.doc.export(path, fmt, features=features, require_native=require_native)
         return path
+
+    def export_solidworks_offline(self, path, *, features=True, require_native=False) -> dict:
+        """Write .SLDPRT without COM; report native tree or whole-part solid fallback."""
+        self._ensure_built()
+        return self.doc.export(path, 'sldprt', features=features, require_native=require_native)
 
     def export_solidworks(self, path, native=True, require_native=False) -> dict:
         """Native SolidWorks part (.SLDPRT) with the feature tree rebuilt (needs SolidWorks
@@ -1208,15 +1224,25 @@ class Assembly:
         from .core.assembly import Assembly as _Asm
         return cls(Path(path).stem, _Asm.load(path))
 
-    def add(self, source, at=None, rotate=None, fixed=None, name=None) -> Component:
+    def add(self, source, at=None, rotate=None, fixed=None, name=None, pose=None,
+            color=None) -> Component:
         """Insert a part (.bcad / STEP path, or a saved Part). at: world position of the part
-        origin; rotate: (axis, degrees)."""
+        origin; rotate: (axis, degrees); or pose: a 4x4 placement matrix (rotation + translation,
+        mm), e.g. a component transform read from another CAD assembly. color: (r, g, b), 0..255 or
+        0..1."""
         from .core.assembly import Pose, rodrigues
         if isinstance(source, Part):
             if source.doc.path is None:
                 raise ApiError("Save the Part before adding it to an assembly")
             source = source.doc.path
-        pose = None
+        if pose is not None:
+            if at is not None or rotate is not None:
+                raise ApiError("Give pose= or at= / rotate=, not both")
+            M = np.asarray(pose, float)
+            if M.shape != (4, 4) or not np.allclose(M[:3, :3] @ M[:3, :3].T, np.eye(3), atol=1e-6) \
+                    or np.linalg.det(M[:3, :3]) < 0:
+                raise ApiError("pose must be a 4x4 rotation + translation matrix")
+            pose = Pose(M[:3, :3], M[:3, 3])
         if at is not None or rotate is not None:
             R = np.eye(3)
             if rotate is not None:
@@ -1225,6 +1251,9 @@ class Assembly:
                 R = rodrigues(a / np.linalg.norm(a) * math.radians(deg))
             pose = Pose(R, at if at is not None else np.zeros(3))
         comp = self.asm.add_component(source, pose, fixed, name)
+        if color is not None:                       # RGB 0..255 (as the GUI), or 0..1 floats
+            c = [float(v) for v in color]
+            comp.color = tuple(int(round(v * 255)) if max(c) <= 1.0 else int(round(v)) for v in c)
         return Component(self, comp)
 
     def component(self, name) -> Component:
@@ -1617,6 +1646,72 @@ class Drawing:
                 "dims": [{"id": d.id, "view": self.dr.view(d.view).name, "kind": d.kind,
                           "value": round(d.value, 6), "text": d.label(self.dr.decimals)}
                          for d in self.dr.dims]}
+
+
+def export_solidworks_tree(path, children, name=None) -> list:
+    """A SolidWorks 2024 assembly of sub-assemblies (and parts) written by BauyrCAD itself, no
+    SolidWorks needed: `path` = the top `.SLDASM`; `children` = [(child, pose, fixed)] with child
+    an `Assembly`, a `.bcasm` path, an existing `.SLDASM` in the same folder (e.g. one saved by
+    SolidWorks: referenced as it is), a saved `Part` or a `.bcad` / STEP path, pose a 4x4 matrix
+    (mm; None = identity) and fixed True / False. Each child assembly is written first as
+    `<its name>.SLDASM` next to the top (with its parts, like `asm.export(".SLDASM")`), then the
+    top references it as a sub-assembly component. Every assembly in the tree may have up to
+    `swfile.max_components()` components, so large machines go in as a tree of sub-assemblies.
+    No mates and no colours (as `asm.export(".SLDASM")`). Returns the files written."""
+    from .core import swfile, parasolid
+    from .core.exchange import ExchangeError
+    path = Path(path)
+    if path.suffix.lower() != ".sldasm":
+        raise ApiError("export_solidworks_tree writes a .SLDASM")
+    folder = path.parent
+    folder.mkdir(parents=True, exist_ok=True)
+    parts, instances, written, index = [], [], [], {}
+    for child, pose, fixed in children:
+        M = np.eye(4) if pose is None else np.asarray(pose, float)
+        if isinstance(child, (str, Path)) and str(child).lower().endswith(".bcasm"):
+            child = Assembly.open(child)
+        if isinstance(child, (str, Path)) and str(child).lower().endswith(".sldasm"):
+            sub = Path(child)                     # an existing SolidWorks assembly: referenced as is
+            if not sub.exists():
+                raise ApiError(f"{sub} not found")
+            if sub.resolve().parent != folder.resolve():
+                raise ApiError(f"{sub.name} must be in the same folder as {path.name}")
+            key = ("asm", sub.stem.lower())
+            if key not in index:
+                index[key] = len(parts)
+                parts.append((sub.stem, sub, None))
+        elif isinstance(child, Assembly):
+            stem = child.asm.path.stem if child.asm.path else child.name
+            key = ("asm", stem.lower())
+            if key not in index:
+                sub = folder / f"{stem}.SLDASM"
+                try:
+                    child.asm.export(sub, "sldasm")
+                except ExchangeError as e:
+                    raise ApiError(f"sub-assembly {stem}: {e}") from e
+                index[key] = len(parts)
+                parts.append((stem, sub, None))
+                written.append(sub)
+        else:
+            if isinstance(child, Part):
+                if child.doc.path is None:
+                    raise ApiError("Save the Part before adding it to an assembly tree")
+                child = child.doc.path
+            key = ("part", str(Path(child).resolve()).lower())
+            if key not in index:
+                from .core.assembly import Component as _C
+                c = _C("tmp", Path(child).stem, str(child)).load()
+                if c.load_error:
+                    raise ApiError(c.load_error)
+                index[key] = len(parts)
+                parts.append((Path(child).stem, c.shape, None))
+        instances.append((index[key], None, M, bool(fixed)))
+    try:
+        written += swfile.write_assembly(parts, instances, path, name=name or path.stem)
+    except (swfile.SwFileError, parasolid.XtError) as e:
+        raise ApiError(f"SolidWorks assembly (.SLDASM) export: {e}") from e
+    written.append(path)
+    return written
 
 
 def _parse_scale(scale):

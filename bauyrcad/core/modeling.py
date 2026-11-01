@@ -487,18 +487,32 @@ def helix_wire(center, axis, xdir, radius, pitch, turns, left_hand=False, taper_
 
 
 def spline_wire(points, closed=False):
-    """Interpolating 3D curve through points (Curve Through XYZ Points)."""
+    """Interpolating 3D curve through points (Curve Through XYZ Points), the curve SolidWorks
+    makes from the same points: a cubic spline in chord-length parameters with natural ends
+    (zero curvature) when open, periodic when closed."""
     from OCP.GeomAPI import GeomAPI_Interpolate
     from OCP.TColgp import TColgp_HArray1OfPnt
+    from OCP.TColStd import TColStd_HArray1OfReal
+    from scipy.interpolate import CubicSpline
     pts = np.asarray(points, float)
     if len(pts) < 2:
         raise GeometryError("A curve needs at least two points")
     if len(pts) == 2:
         return BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(_pnt(pts[0]), _pnt(pts[1])).Edge()).Wire()
-    arr = TColgp_HArray1OfPnt(1, len(pts))
-    for i, p in enumerate(pts):
+    loop = np.vstack([pts, pts[:1]]) if closed else pts
+    d = np.maximum(np.linalg.norm(np.diff(loop, axis=0), axis=1), 1e-12)
+    t = np.concatenate([[0.0], np.cumsum(d)]) / float(np.sum(d))
+    # the one cubic spline through the points with these parameters and end tangents: the
+    # natural / periodic spline when the tangents are its own (a closed curve repeats its
+    # first point, and starts and ends with the same tangent)
+    cs = CubicSpline(t, loop, axis=0, bc_type="periodic" if closed else "natural")
+    arr = TColgp_HArray1OfPnt(1, len(loop))
+    params = TColStd_HArray1OfReal(1, len(loop))
+    for i, (p, x) in enumerate(zip(loop, t)):
         arr.SetValue(i + 1, _pnt(p))
-    it = GeomAPI_Interpolate(arr, bool(closed), 1e-9)
+        params.SetValue(i + 1, float(x))
+    it = GeomAPI_Interpolate(arr, params, False, 1e-9)
+    it.Load(_vec(cs(0.0, 1)), _vec(cs(1.0, 1)), False)
     it.Perform()
     if not it.IsDone():
         raise GeometryError("Curve interpolation failed")

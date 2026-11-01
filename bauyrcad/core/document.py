@@ -207,11 +207,12 @@ class Document:
 
     import_step = import_file
 
-    def export(self, path, fmt: str | None = None) -> None:
+    def export(self, path, fmt: str | None = None, *, features=False, require_native=False):
         """Export the body; fmt is a key of exchange.FORMATS (default: by extension)."""
         from .exchange import export
         name = self.path.stem if self.path else "Part1"
-        export(self.body, path, fmt, name=name)
+        return export(self.body, path, fmt, name=name, document=self, features=features,
+                      require_native=require_native)
 
     def export_step(self, path) -> None:
         self.export(path, "step214")

@@ -101,6 +101,19 @@ def plane_parts():
     mid = f.plane(mid=(f.face("+z"), f.face("-z")))
     s2 = f.sketch(mid); s2.rect((40, 10), (60, 20)); f.extrude(s2, 6, midplane=True)
     out.append((f, {"Sketch2": ["Plane1"]}))
+    g = Part("front-on-plane1")              # 'front' with a face-driven plane lying on it
+    s = g.sketch("front"); s.rect((-20, -15), (20, 15)); g.extrude(s, 10, midplane=True)
+    g.plane(mid=(g.face("+z"), g.face("-z")))              # Plane1 at z = 0, follows the faces
+    s2 = g.sketch("front"); s2.circle((0, 0), d=8); g.cut(s2, through=True, both=True)
+    # an explicit plane there (a SketchPlane, or a file from before 'front' was stored as
+    # the Front Plane) goes on the Front Plane too, never on the face-driven Plane1
+    from bauyrcad.core.plane import FRONT
+    s3 = g.sketch(SketchPlane(FRONT.origin, FRONT.normal, FRONT.xdir))
+    s3.circle((12, 0), d=4); g.cut(s3, through=True, both=True)
+    assert s2.feature.plane_spec == {"type": "std", "name": "Front Plane"}
+    assert s3.feature.plane_spec is None
+    out.append((g, {"Sketch1": ["Front Plane"], "Sketch2": ["Front Plane"],
+                    "Sketch3": ["Front Plane"]}))
     return out
 
 
@@ -299,6 +312,36 @@ def test_splines_keep_their_points(sw, tmp_path):
     sw.close(doc)
 
 
+def spline_band(name, width, at=(0, 0)):
+    """A strip `width` mm wide under the 6-point spline (its lower edge is the spline moved
+    down, as 40 lines), 2 mm thick: almost all of its volume difference is along the spline."""
+    from bauyrcad.core.sketch.model import spline_eval
+    p = Part(name)
+    pts = [(x + at[0], y + at[1]) for x, y in
+           [(20, 20), (25, 23), (30, 25), (36, 22), (44, 18), (51, 18)]]
+    s = p.sketch("front")
+    sp = s.spline(pts)
+    low = [tuple(q - (0, width)) for q in np.asarray(spline_eval(np.array(pts, float), 40)[0])[::-1]]
+    s.polyline([sp.pts[-1]] + low + [sp.pts[0]])
+    p.extrude(s, 2)
+    return p
+
+
+def test_narrow_spline_strips_export_strictly(sw, tmp_path):
+    """D8: the spline's shape difference is a note whatever the feature's width (the check has
+    an allowance along the spline, and BauyrCAD's volume is measured exactly)."""
+    for part in (spline_band("spline-strip-1", 1.0), spline_band("spline-strip-03", 0.3),
+                 spline_band("spline-strip-far", 0.3, at=(300, 200))):
+        rep, doc = proven(sw, part, tmp_path, notes=("spline through the same points",),
+                          rel=1e-3)
+        f = feature(sw, doc, "Sketch1")
+        assert summary(sw, doc, "Sketch1")["segments"] == {"spline": 1, "line": 41}
+        splines = [sw.T(x, "ISketchSpline") for x in sketch_def(sw, f).GetSketchSegments()
+                   if sw.T(x, "ISketchSegment").GetType() == 3]
+        assert [x.GetPointCount() for x in splines] == [6], part.name
+        sw.close(doc)
+
+
 # ---- SK-EN-07 / SK-EN-10 / SK-BL-02/04/05/06 / SK-OP-03: points, construction, shared centres ---
 def builder_part():
     p = Part("builders")
@@ -455,4 +498,31 @@ def test_empty_and_unused_sketches_keep_their_names(sw, tmp_path):
         assert summary(sw, doc, name)["segments"] == segs, name
     assert parents(sw, feature(sw, doc, "Sketch2")) == ["Top Plane"]
     assert parents(sw, feature(sw, doc, "Sketch3")) == ["Boss-Extrude1"]
+    sw.close(doc)
+
+
+# ---- SK-EN-07: a Point entity on a curve's own point (GUI Point tool snapped to it) -------------
+def test_point_entity_on_a_curve_point_is_kept_and_tied(sw, tmp_path):
+    p = Part("point-on-curve-point")
+    s = p.sketch("front")
+    c = s.circle((20, 15), d=10)
+    L = s.rect((0, 0), (40, 30))
+    s.sk.add_point_entity(c.center)               # snapped to the circle's centre
+    s.sk.add_point_entity(L[0].p1)                # snapped to a line end (a corner)
+    p.extrude(s, 5)
+    s2 = p.sketch("front")                        # an under-defined sketch: the tie is the
+    ln = s2.line((50, 0), (60, 8))                # only thing holding the Point on the end
+    s2.sk.add_point_entity(ln.p2)
+    rep, doc = proven(sw, p, tmp_path)
+    got = summary(sw, doc, "Sketch1")
+    # SolidWorks keeps the Point entities as user points, each tied by one Coincident
+    assert got["user_points"] == 2 and got["points"] == 7, got
+    assert got["relations"] == {"coincident": 2, "horizontal": 2, "vertical": 2}, got
+    got2 = summary(sw, doc, "Sketch2")
+    assert got2["user_points"] == 1 and got2["relations"] == {"coincident": 1}, got2
+    for name, want in (("Sketch1", [(0, 0), (20, 15)]), ("Sketch2", [(60, 8)])):
+        raw = list(sketch_def(sw, feature(sw, doc, name)).GetUserPoints2())   # 8 per point,
+        xy = sorted((round(raw[k + 5] * 1e3, 6), round(raw[k + 6] * 1e3, 6))   # location last
+                    for k in range(0, len(raw), 8))
+        assert xy == want, (name, xy)
     sw.close(doc)

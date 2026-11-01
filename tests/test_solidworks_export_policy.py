@@ -1,4 +1,5 @@
 import math
+import numpy as np
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
@@ -54,7 +55,33 @@ def test_strict_export_rejects_known_gaps_before_creating_file(tmp_path):
     p.doc.features[0].suppressed = False
     p.plane('front', offset=5)
     p.axis(point=(0, 0, 0), direction=(0, 1, 0))
-    assert any('ref_axis' in issue for issue in solidworks.native_export_issues(p.doc))
+    p.point((1, 2, 3))
+    p.curve([(0, 0, 0), (10, 5, 0), (20, 0, 5)])
+    assert solidworks.native_export_issues(p.doc) == []        # reference geometry exports (WP05)
+
+
+def test_precheck_refuses_reference_geometry_solidworks_cannot_define():
+    from bauyrcad import solidworks_features as swf
+    p = plate()
+    # BauyrCAD turns the base normal about any line; SolidWorks' 'At angle' plane turns
+    # about a line lying in (or parallel to) the base plane
+    p.plane('front', angle=30, axis=(1, 0, 1))
+    tilted = p.doc.features[-1]
+    issues = solidworks.native_export_issues(p.doc)
+    assert any(tilted.name in i and 'not parallel to the base plane' in i for i in issues), issues
+    with pytest.raises(solidworks._NotNative, match='not parallel'):
+        swf.require(tilted, p.doc.context_before(tilted))
+    # a planar face's normal can't be the line an angled plane turns about
+    q = plate()
+    q.plane('front', angle=30, axis=q.face('+z'))
+    issues = solidworks.native_export_issues(q.doc)
+    assert any("planar face's normal" in i for i in issues), issues
+    # ... but it can be what a plane is normal to, and an angle about an axis in the plane is fine
+    r = plate()
+    r.plane(normal_to=r.face('+z'), at=(5, 5, 5))
+    r.plane('front', angle=30, axis='y')
+    r.plane('top', angle=-45, axis=r.edges_where(kind='line', direction='x', near=(10, 20, 5))[0])
+    assert solidworks.native_export_issues(r.doc) == []
 
 
 def test_strict_runtime_failure_never_uses_body_fallback(monkeypatch, tmp_path):
@@ -129,6 +156,25 @@ def test_precheck_finds_runtime_only_failures_before_solidworks(tmp_path):
     q = Part(); s = q.sketch("front"); s.rect((10, 0), (20, 30)); q.revolve(s, axis="y")
     issues = solidworks.native_export_issues(q.doc)
     assert any("Revolve1" in i and "axis" in i for i in issues), issues
+    # revolve about a line in another sketch / an ordinary line outside the profile: SolidWorks
+    # makes no feature (seen in SolidWorks 2024), so they are refused before it starts; a
+    # profile edge used as the axis exports
+    for external in (True, False):
+        r = Part()
+        axis_sketch = r.sketch("front"); line = axis_sketch.line((0, -10), (0, 40))
+        profile = r.sketch("front") if external else axis_sketch
+        profile.rect((10, 0), (20, 30)); r.revolve(profile, axis=line)
+        assert r.doc.features[-1].error is None
+        issues = solidworks.native_export_issues(r.doc)
+        want = "another sketch" if external else "ordinary sketch line"
+        assert len(issues) == 1 and "Revolve1" in issues[0] and want in issues[0], issues
+        with pytest.raises(solidworks._NotNative, match=want):
+            swf.require(r.doc.features[-1], r.doc.context_before(r.doc.features[-1]))
+    e = Part(); s = e.sketch("front")
+    lines = [s.line(a, b) for a, b in (((0, 0), (10, 0)), ((10, 0), (10, 30)),
+                                       ((10, 30), (0, 30)), ((0, 30), (0, 0)))]
+    e.revolve(s, axis=lines[-1])
+    assert solidworks.native_export_issues(e.doc) == []
     # an import holding two solids
     two = Part(); a = two.sketch("front"); a.rect((0, 0), (5, 5)); a.rect((10, 0), (15, 5))
     two.extrude(a, 5); two.export(tmp_path / "two.step")
@@ -412,3 +458,74 @@ def test_explicit_plane_origins_and_text_heights_are_known_without_solidworks():
     by_id = {f.id: f for f in t.doc.features}
     assert solidworks._text_height(t.doc.features[3], by_id) == 6
     assert solidworks._text_height(t.doc.features[1], by_id) == 0
+
+
+def test_a_failed_process_probe_never_claims_the_users_solidworks(monkeypatch):
+    """Session ownership fails closed: when tasklist fails, the instance DispatchEx returned
+    may be the user's, so it is never hidden, closed (CloseAllDocuments) or exited."""
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(
+        subprocess.TimeoutExpired("tasklist", 20)))
+    assert solidworks._sw_pids() is None
+    assert solidworks._running()                      # unknown counts as running
+    own = solidworks._owns_instance
+    assert own(None, {7}) == (False, set())           # probe failed before DispatchEx
+    assert own({7}, None) == (False, set())           # ... or after it
+    assert own({7}, {7}) == (False, set())            # attached to the user's instance
+    assert own({7}, {7, 9}) == (True, {9})            # a new one we started
+    assert own(set(), {9}) == (True, {9})
+    assert own(set(), set()) == (True, set())         # nothing ran before: it can only be ours
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=1, stdout=""))
+    assert solidworks._sw_pids() is None
+
+
+def test_api_sketch_on_a_standard_plane_references_it():
+    """Part.sketch('front') stores the Front Plane as its reference (like the GUI), so the
+    SolidWorks export puts it on the Front Plane, never on a reference plane lying there."""
+    p = Part()
+    for name, want in (("front", "Front Plane"), ("xz", "Top Plane"), ("right", "Right Plane")):
+        assert p.sketch(name).feature.plane_spec == {"type": "std", "name": want}
+    from bauyrcad import solidworks_features as swf
+    from bauyrcad.core.plane import FRONT, SketchPlane
+    st = swf.State()
+    st.planes.append((SketchPlane(FRONT.origin, FRONT.normal, FRONT.xdir), "Plane1"))
+    got = swf.helper_plane(None, None, st, SketchPlane((0, 0, 0), (0, 0, -1), (1, 0, 0)), "S")
+    assert got == ("std", "Front Plane")              # the standard plane before any other
+
+
+def test_spline_bounded_volumes_are_measured_exactly():
+    """OpenCASCADE's whole-face Gauss integration is ~1e-4 off on a multi-span spline face
+    (and the adaptive one several %); split at the knots both are exact."""
+    from scipy.interpolate import CubicSpline
+    from bauyrcad.core import geometry
+    from bauyrcad.core.sketch.model import spline_eval, spline_params
+    pts = np.array([(20, 20), (25, 23), (30, 25), (36, 22), (44, 18), (51, 18)], float)
+    p = Part()
+    s = p.sketch("front"); sp = s.spline([tuple(q) for q in pts])
+    low = [tuple(q - (0, 0.3)) for q in np.asarray(spline_eval(pts, 40)[0])[::-1]]
+    s.polyline([sp.pts[-1]] + low + [sp.pts[0]]); p.extrude(s, 2)
+    cs = CubicSpline(spline_params(pts), pts, axis=0, bc_type="not-a-knot")
+    tt = np.linspace(0, 1, 400001)
+    xy, d = cs(tt), cs(tt, 1)
+    area = np.trapezoid(xy[:, 0] * d[:, 1], tt)                      # Green: x dy
+    loop = np.vstack([xy[-1:], low, xy[:1]])
+    area += sum(0.5 * (loop[k, 0] + loop[k + 1, 0]) * (loop[k + 1, 1] - loop[k, 1])
+                for k in range(len(loop) - 1))
+    exact = 2 * abs(area)
+    (v, c), (va, ca) = geometry.accurate_mass_properties(p.doc.body)
+    assert v == pytest.approx(exact, rel=1e-8) and va == pytest.approx(exact, rel=1e-8)
+    assert abs(geometry.volume(p.doc.body) - exact) > 1e-3        # what the plain measure gives
+    assert geometry.freeform_area(p.doc.body) == pytest.approx(70, rel=0.1)
+
+
+def test_accurate_measure_keeps_a_sweep_along_a_closed_spline():
+    """Splitting a sweep along a closed periodic spline at its knots gives an invalid shape
+    (volume -272056 mm³ for a 392 mm³ ring): the accurate measure then keeps the plain one."""
+    from bauyrcad.core import geometry
+    p = Part("closed-sweep")
+    c = p.curve([(20, 0, 0), (0, 20, 3), (-20, 0, 0), (0, -20, -3)], closed=True)
+    p.sweep(c, d=2)
+    (v, _), (va, _) = geometry.accurate_mass_properties(p.doc.body)
+    assert v == pytest.approx(geometry.volume(p.doc.body), rel=1e-3)
+    assert va == pytest.approx(v, rel=1e-3)

@@ -26,6 +26,7 @@ Also here, shared by every family:
 from __future__ import annotations
 
 import math
+import os
 
 import numpy as np
 
@@ -53,9 +54,10 @@ class State:
     def __init__(self, report=None):
         self.report = report
         self.features: dict = {}        # our feature id -> IFeature (or list of them)
-        self.planes: list = []          # (SketchPlane, IFeature): planes later sketches can use
+        self.planes: list = []          # (SketchPlane, IFeature): helper planes explicit planes reuse
         self.axes: dict = {}            # key -> IFeature (reference axes made for features)
         self.points: dict = {}          # key -> (IFeature, [ISketchPoint]) helper points
+        self.ref_points: list = []      # (xyz mm, IFeature) reference points made (steps, helpers)
         self.sketches: dict = {}        # sketch id -> (IFeature, _SketchMap, SketchFeature)
         self.helpers: list = report.helpers if report is not None else []
         self.owned: set = set()         # GetID of SolidWorks features that are steps / helpers
@@ -106,11 +108,12 @@ def plane_spec_issues(spec) -> list:
     return [] if t in ("std", "feature", "face", "explicit") else [f"a plane given as {t} can't be selected"]
 
 
-def axis_spec_issues(spec, ctx, circular=False) -> list:
-    """Axis / direction specs select_axis can't select in SolidWorks."""
+def axis_spec_issues(spec, ctx, circular=False, line=False) -> list:
+    """Axis / direction specs select_axis can't select in SolidWorks. line=True: the spec
+    must stand for a line (a planar face's normal can't be one in SolidWorks)."""
     from .core.refs import resolver
     t = (spec or {}).get("type")
-    if t in ("std", "explicit"):
+    if t in ("std", "explicit", "sketch_line"):
         return []
     if t == "edge":
         try:
@@ -118,18 +121,28 @@ def axis_spec_issues(spec, ctx, circular=False) -> list:
             info = r.edges[r.edge(spec["ref"])]
         except Exception:  # noqa: BLE001 - a broken reference is the feature's own error
             return []
-        return [] if info["kind"] == "line" else ["an axis on a circular edge is not transferred yet"]
+        return ([] if info["kind"] in ("line", "circle", "arc") else
+                [f"an axis on a {info['kind']} edge has no SolidWorks equivalent"])
     if t == "face":
-        if not circular:
+        if not (circular or line):
             return []
         try:
             _, face = our_face_point(ctx(), spec["ref"])
         except Exception:  # noqa: BLE001
             return []
-        return ([] if face.kind in ("cylinder", "cone") else
-                ["a planar face as a circular-pattern axis has no SolidWorks equivalent"])
+        if face.kind in ("cylinder", "cone"):
+            return []
+        return (["a planar face as a circular-pattern axis has no SolidWorks equivalent"] if circular
+                else ["a planar face's normal as the rotation axis has no SolidWorks equivalent "
+                      "(pick an edge, axis or line)"])
     if t == "feature":
-        return ["a reference-axis feature as the axis is not transferred yet"]
+        try:
+            g = ctx().features.get(spec["id"])
+        except Exception:  # noqa: BLE001
+            return []
+        if g is None or g.TYPE == "ref_axis":
+            return []
+        return [f"{g.name} ({g.TYPE}) can't be selected as an axis in SolidWorks"]
     return [f"an axis given as {t} is not transferred yet"]
 
 
@@ -203,6 +216,17 @@ def _revolve_issues(f, ctx):
     if f.axis_spec is not None:
         return ["a revolve about a model edge, reference axis or X/Y/Z axis is not transferred "
                 "yet (use a line in a sketch as the axis)"]
+    if f.axis_sketch_id and f.axis_sketch_id != f.sketch_id:
+        return ["a revolve about a line in another sketch is not transferred yet (SolidWorks "
+                "makes no feature; draw the axis as a centerline in the profile sketch)"]
+    if f.axis_id is not None:
+        from .core.sketch import Line
+        sk = ctx().features.get(f.sketch_id)
+        axis = sk.sketch.entities.get(f.axis_id) if sk is not None else None
+        if isinstance(axis, Line) and not axis.construction and sk.profile_error:
+            return ["a revolve about an ordinary sketch line that is not part of the profile is "
+                    "not transferred yet (SolidWorks makes no feature; make the line a "
+                    "centerline)"]
     return []
 
 
@@ -224,12 +248,44 @@ def _fillet_issues(f, ctx):
 @precheck("ref_plane")
 def _ref_plane_issues(f, ctx):
     out = []
-    if f.mode not in ("offset", "mid") or (f.mode == "mid" and f.base2 is None):
-        out.append(f"a {f.mode} reference plane is not transferred yet")
-    out += plane_spec_issues(f.base)
+    if f.mode not in ("offset", "mid", "angle", "points", "normal"):
+        return [f"a {f.mode} reference plane is not transferred yet"]
+    if f.mode in ("offset", "mid", "angle"):
+        out += plane_spec_issues(f.base)
     if f.mode == "mid" and f.base2 is not None:
         out += plane_spec_issues(f.base2)
+    if f.mode in ("angle", "normal") and f.axis is not None:
+        out += axis_spec_issues(f.axis, ctx, line=f.mode == "angle")
+    if f.mode == "angle" and f.axis is not None and not out:
+        from .core.refs import resolve_axis, resolve_plane
+        try:
+            c = ctx()
+            n = resolve_plane(f.base, c).normal
+            a = resolve_axis(f.axis, c)[1]
+        except Exception:  # noqa: BLE001 - a broken reference is the feature's own error
+            return out
+        if abs(float(np.asarray(a) @ np.asarray(n))) > 1e-9:
+            out.append("the rotation axis is not parallel to the base plane: SolidWorks' 'At "
+                       "angle' plane turns about a line lying in (or parallel to) the plane")
     return out
+
+
+@precheck("ref_axis")
+def _ref_axis_issues(f, ctx):
+    if f.mode not in ("points", "face", "edge", "planes", "point_dir"):
+        return [f"a {f.mode} reference axis is not transferred yet"]
+    out = []
+    if f.mode == "planes":
+        out += plane_spec_issues(f.base) + plane_spec_issues(f.base2)
+    if f.mode == "edge" and f.ref is not None:
+        out += axis_spec_issues({"type": "edge", "ref": f.ref}, ctx)
+    return out
+
+
+@precheck("ref_point")
+def _ref_point_issues(f, ctx):
+    return ([] if f.mode in ("coords", "arc_center", "face_center") else
+            [f"a {f.mode} reference point is not transferred yet"])
 
 
 @precheck("draft")
@@ -567,17 +623,22 @@ def offset_plane(s, doc, st, std_name, offset_mm, owner):
 
 def helper_plane(s, doc, st, plane, owner):
     """A reference plane for an explicit plane (no BauyrCAD feature or face stands for it):
-    a standard plane itself, an offset of one, or a plane normal to a hidden 3D-sketch line
-    through the plane's origin ('<owner> Plane' + '<owner> Plane Sketch')."""
+    a standard plane itself, an earlier helper plane in the same place, an offset of a
+    standard plane, or a plane normal to a hidden 3D-sketch line through the plane's origin
+    ('<owner> Plane' + '<owner> Plane Sketch'). The standard planes come first, and
+    transferred BauyrCAD reference planes are never reused: they may follow model faces,
+    while an explicit plane is fixed (st.planes holds helper planes only)."""
     from .core.plane import REFERENCE_PLANES
+    for name, ref in REFERENCE_PLANES.items():
+        if (abs(abs(float(plane.normal @ ref.normal)) - 1) < 1e-9
+                and abs(float((plane.origin - ref.origin) @ ref.normal)) < 1e-9):
+            return ("std", name)
     for pl, feat in st.planes:
         if _same_plane(pl, plane):
             return feat
     for name, ref in REFERENCE_PLANES.items():
         if abs(abs(float(plane.normal @ ref.normal)) - 1) < 1e-9:
             off = float((plane.origin - ref.origin) @ ref.normal)
-            if abs(off) < 1e-9:
-                return ("std", name)
             return offset_plane(s, doc, st, name, off, owner)
     n = _unit(plane.normal)
     with keep_selection(s, doc):
@@ -625,6 +686,160 @@ def helper_points(s, doc, st, points, owner):
         add_helper(s, doc, st, sk, helper_name(st, owner, "Points"))
     st.points[key] = (sk, pts)
     return sk, pts
+
+
+def body_vertices(s, doc):
+    part = s.T(doc, "IPartDoc")
+    out = []
+    for b in part.GetBodies2(0, False) or ():
+        out += [s.T(v, "IVertex") for v in (s.T(b, "IBody2").GetVertices() or ())]
+    return out
+
+
+def point_selectors(s, doc, st, points, owner):
+    """For each point (mm) a function sel(mark, append) that selects an entity lying there:
+    the origin, a model vertex, a reference point made earlier, else (D1) a point of ONE
+    hidden 3D sketch '<owner> Points' for all the points nothing stands for. BauyrCAD keeps
+    such points as coordinates only, so the coordinates decide."""
+    ext = s.T(doc.Extension, "IModelDocExtension")
+    verts = None
+    sels, missing = [None] * len(points), []
+
+    def entity_sel(obj):
+        return lambda mark, append: select(s, doc, obj, mark, append)
+
+    def feature_sel(feat):
+        return lambda mark, append: select_feature(s, doc, feat, mark, append)
+
+    def origin_sel(mark, append):
+        if not ext.SelectByID2("Point1@Origin", "EXTSKETCHPOINT", 0, 0, 0, append, mark, None, 0):
+            raise _not_native("the origin could not be selected")
+
+    for k, p in enumerate(points):
+        p = np.asarray(p, float)
+        if float(np.linalg.norm(p)) < 1e-9:
+            sels[k] = origin_sel
+            continue
+        hit = next((feat for q, feat in st.ref_points if np.linalg.norm(q - p) < 1e-6), None)
+        if hit is not None:
+            sels[k] = feature_sel(hit)
+            continue
+        if verts is None:
+            verts = [(np.array(v.GetPoint()[:3]) / MM, v) for v in body_vertices(s, doc)]
+        v = next((v for q, v in verts if np.linalg.norm(q - p) < 1e-6), None)
+        if v is not None:
+            sels[k] = entity_sel(v)
+        else:
+            missing.append(k)
+    if missing:
+        _, pts = helper_points(s, doc, st, [points[k] for k in missing], owner)
+
+        def sketch_sel(sp):
+            def sel(mark, append):
+                if not s.T(sp, "ISketchPoint").Select4(append, s.select_data(doc, mark)):
+                    raise _not_native("a helper point could not be selected")
+            return sel
+        for k, sp in zip(missing, pts):
+            sels[k] = sketch_sel(sp)
+    return sels
+
+
+def _new_axis(s, doc, what):
+    """InsertAxis2 on the current selection; the new RefAxis feature."""
+    before = last_id(s, doc)
+    ok = doc.InsertAxis2(True)
+    feat = newest_feature(s, doc, before) if ok else None
+    doc.ClearSelection2(True)
+    if feat is None or feat.GetTypeName2() != "RefAxis":
+        raise _not_native(f"SolidWorks could not create {what}")
+    return feat
+
+
+def axis_line(s, feat):
+    """(point mm, unit direction) of a SolidWorks reference axis."""
+    prm = np.array(s.T(s.T(feat, "IFeature").GetSpecificFeature2(), "IRefAxis").GetRefAxisParams())
+    a, b = prm[:3] / MM, prm[3:6] / MM
+    return a, (b - a) / max(float(np.linalg.norm(b - a)), 1e-300)
+
+
+def same_line(p, d, q, e, tol=1e-6) -> bool:
+    """Do the lines (p, d) and (q, e) coincide (mm, any sense)?"""
+    d, e = _unit(d), _unit(e)
+    return (float(np.linalg.norm(np.cross(d, e))) < 1e-9
+            and float(np.linalg.norm(np.cross(np.asarray(q, float) - np.asarray(p, float), d))) < tol)
+
+
+def helper_ref_point(s, doc, st, kind, select_fn, owner, want):
+    """A hidden reference point '<owner> Points' (swRefPointType_e kind on the selection
+    select_fn() makes) at want (mm), made once per place."""
+    want = np.asarray(want, float)
+    for q, feat in st.ref_points:
+        if np.linalg.norm(q - want) < 1e-6:
+            return feat
+    with keep_selection(s, doc):
+        doc.ClearSelection2(True)
+        select_fn()
+        fm = s.T(doc.FeatureManager, "IFeatureManager")
+        before = last_id(s, doc)
+        fm.InsertReferencePoint(kind, 0, 0.0, 1)
+        feat = newest_feature(s, doc, before)
+        doc.ClearSelection2(True)
+        if feat is None or feat.GetTypeName2() != "RefPoint":
+            raise _not_native(f"{owner}: SolidWorks could not create a helper point")
+        if np.linalg.norm(ref_point_xyz(s, feat) - want) > 1e-6:
+            _delete(s, doc, feat)
+            raise _not_native(f"{owner}: SolidWorks placed a helper point elsewhere")
+        add_helper(s, doc, st, feat, helper_name(st, owner, "Points"))
+    st.ref_points.append((want, feat))
+    return feat
+
+
+def ref_point_xyz(s, feat):
+    rp = s.T(s.T(feat, "IFeature").GetSpecificFeature2(), "IRefPoint")
+    return np.array(s.T(rp.GetRefPoint(), "IMathPoint").ArrayData[:3]) / MM
+
+
+def select_circle_axis(s, doc, st, info, owner):
+    """Select what SolidWorks makes a reference axis from for a circular edge's axis: a
+    coaxial cylindrical / conical face next to it, else the face the circle lies in plus a
+    hidden 'Arc Center' reference point '<owner> Points'. The selection is for InsertAxis2."""
+    edge = find_edge(s, doc, info)
+    c, n = np.asarray(info["center"], float), _unit(info["axis"])
+    faces = [s.T(f, "IFace2") for f in (s.T(edge, "IEdge").GetTwoAdjacentFaces2() or ()) if f is not None]
+    for face in faces:
+        surf = s.T(face.GetSurface(), "ISurface")
+        prm = (surf.CylinderParams if surf.IsCylinder() else
+               surf.ConeParams if surf.IsCone() else None)
+        if prm is not None and same_line(c, n, np.array(prm[:3]) / MM, prm[3:6]):
+            doc.ClearSelection2(True)
+            select(s, doc, face, 0, False)
+            return
+    for face in faces:
+        surf = s.T(face.GetSurface(), "ISurface")
+        if surf.IsPlane() and float(np.linalg.norm(np.cross(surf.PlaneParams[:3], n))) < 1e-9:
+            pt = helper_ref_point(s, doc, st, 3, lambda: select(s, doc, edge, 0, False), owner, c)
+            doc.ClearSelection2(True)
+            select(s, doc, face, 0, False)
+            select_feature(s, doc, pt, 0, True)
+            return
+    raise _not_native("the axis of a circular edge with no plane or cylinder next to it can't "
+                      "be made in SolidWorks")
+
+
+def circle_axis(s, doc, st, info, owner):
+    """A hidden reference axis '<owner> Axis' along a circular edge's axis (made once)."""
+    key = ("circle", tuple(np.round(info["center"], 6)), tuple(np.round(np.abs(info["axis"]), 6)))
+    if key in st.axes:
+        return st.axes[key]
+    with keep_selection(s, doc):
+        select_circle_axis(s, doc, st, info, owner)
+        feat = _new_axis(s, doc, "an axis through a circular edge")
+        if not same_line(*axis_line(s, feat), info["center"], info["axis"]):
+            _delete(s, doc, feat)
+            raise _not_native("SolidWorks placed a circular edge's axis elsewhere")
+        add_helper(s, doc, st, feat, helper_name(st, owner, "Axis"))
+    st.axes[key] = feat
+    return feat
 
 
 def _same_plane(a, b) -> bool:
@@ -758,21 +973,43 @@ def prepare_axis(s, doc, st, spec, ctx, owner):
         p, f = our_face_point(ctx, spec["ref"])
         if f.kind in ("cylinder", "cone"):
             face_axis(s, doc, st, find_face(s, doc, p), _face_key(f), owner)
+    elif t == "edge":
+        from .core.refs import resolver
+        r = resolver(ctx)
+        info = r.edges[r.edge(spec["ref"])]
+        if info["kind"] in ("circle", "arc"):
+            circle_axis(s, doc, st, info, owner)
 
 
 def _face_key(f):
     return ("face", tuple(np.round(f.axis_point, 6)), tuple(np.round(np.abs(f.axis), 6)))
 
 
-def select_axis(s, doc, st, spec, ctx, mark, append=True, owner="Axis"):
-    """Select an axis / direction spec: std x/y/z or an explicit line (a helper axis is
-    made), a straight edge, a planar face (its normal) or a cylindrical face (a helper axis
-    through it). Helpers keep any selection already made."""
+def select_axis(s, doc, st, spec, ctx, mark, append=True, owner="Axis", line=False):
+    """Select an axis / direction spec: a reference axis made earlier (by its BauyrCAD
+    feature id), a sketch line, a straight edge, std x/y/z or an explicit line (a helper axis
+    is made), a circular edge or a cylindrical face (their axis: the reference axis made
+    from the face, else a helper), or a planar face (its normal; line=True refuses it).
+    Helpers keep any selection already made."""
     from .core.refs import resolver
-    issues = axis_spec_issues(spec, lambda: ctx)
+    issues = axis_spec_issues(spec, lambda: ctx, line=line)
     if issues:
         raise _not_native(issues[0])
     t = spec.get("type")
+    if t == "feature":
+        feat = st.features.get(spec["id"])
+        if feat is None:
+            raise _not_native("a reference axis was not transferred")
+        select_feature(s, doc, feat, mark, append)
+        return 1.0
+    if t == "sketch_line":
+        sk = st.sketches.get(spec["sketch"])
+        if sk is None:
+            raise _not_native(f"{owner}: the sketch of its axis line was not transferred")
+        seg = sk[1].segs.get(spec["entity"])
+        if seg is None or not s.T(seg, "ISketchSegment").Select4(append, s.select_data(doc, mark)):
+            raise _not_native("a sketch line could not be selected as the axis")
+        return 1.0
     if t == "std":
         select_feature(s, doc, std_axis(s, doc, st, spec["name"].lower().lstrip("+-"), owner),
                        mark, append)
@@ -784,6 +1021,9 @@ def select_axis(s, doc, st, spec, ctx, mark, append=True, owner="Axis"):
     if t == "edge":
         r = resolver(ctx)
         info = r.edges[r.edge(spec["ref"])]
+        if info["kind"] in ("circle", "arc"):
+            select_feature(s, doc, circle_axis(s, doc, st, info, owner), mark, append)
+            return 1.0
         select(s, doc, find_edge(s, doc, info), mark, append)
         return 1.0
     if t == "face":
@@ -905,12 +1145,14 @@ def fillet(s, doc, f, ctx, st, attempt):
 def chamfer(s, doc, f, ctx, st, attempt):
     """SolidWorks ignores the flip flag for these chamfers through the API, so the other side
     is made by swapping: distance-distance (d2, d1); angle-distance (d tan a, 90 - a). The
-    equal-distance type makes nothing through the API: distance-angle 45 deg is the same."""
+    equal-distance bit is combined with distance-distance, not used as a standalone type."""
     if attempt == 0:
         require(f, ctx)
     d1, d2, ang = f.distance, f.distance2, f.angle
     if f.kind == "distance":
-        variants = [(1, d1, 45.0, d1)]
+        # Equal setback is not a 45-degree chamfer when adjacent faces are not
+        # perpendicular: swChamferDistanceDistance | swChamferEqualDistance.
+        variants = [(18, d1, 0.0, d1)]
     elif f.kind == "distance_distance":
         variants = [(2, d1, 0.0, d2), (2, d2, 0.0, d1)]
     else:
@@ -952,40 +1194,295 @@ def draft(s, doc, f, ctx, st, attempt):
     return fm.InsertMultiFaceDraft(math.radians(f.angle), bool(attempt), False, 0, False, False)
 
 
+# swRefPlaneReferenceConstraints_e
+_RP_PARALLEL, _RP_PERPENDICULAR, _RP_COINCIDENT, _RP_DISTANCE = 1, 2, 4, 8
+_RP_ANGLE, _RP_MID, _RP_FLIP = 16, 128, 256
+
+
+def plane_frame(s, feat):
+    """(origin mm, unit normal) of a SolidWorks reference plane (IRefPlane.Transform)."""
+    xf = s.T(s.T(s.T(feat, "IFeature").GetSpecificFeature2(), "IRefPlane").Transform,
+             "IMathTransform")
+    a = np.array(xf.ArrayData)
+    return a[9:12] / MM, a[6:9]
+
+
+def plane_match(s, feat, want):
+    """(the plane lies where want does, its normal is the opposite of want's)."""
+    origin, normal = plane_frame(s, feat)
+    dot = float(normal @ want.normal)
+    ok = abs(abs(dot) - 1) < 1e-7 and abs(float((origin - want.origin) @ want.normal)) < 1e-6
+    return ok, dot < 0
+
+
+def _plane_point(f, ctx):
+    """The point a 'normal' plane goes through (BauyrCAD: f.point, else the axis point)."""
+    from .core.refs import resolve_axis
+    return np.asarray(f.point if f.point is not None else resolve_axis(f.axis, ctx)[0], float)
+
+
+def _plane_variants(s, doc, f, ctx, st):
+    """[(select(), InsertRefPlane arguments)] that may make BauyrCAD's plane, the predicted
+    one first. SolidWorks has no 'Flip normal' through the API: the variants that reverse the
+    normal swap the references (mid, three points) or turn the other way (angle)."""
+    def plane(spec, mark, append):
+        return lambda: select_plane(s, doc, st, spec, ctx, mark, append, owner=f.name)
+
+    def seq(*fns):
+        def run():
+            for fn in fns:
+                fn()
+        return run
+    if f.mode == "offset":
+        d = float(f.distance)
+        if abs(d) < 1e-12:
+            return [(plane(f.base, 0, False), (_RP_COINCIDENT, 0.0, 0, 0, 0, 0))]
+        flags = [_RP_FLIP if d < 0 else 0, 0 if d < 0 else _RP_FLIP]
+        return [(plane(f.base, 0, False), (_RP_DISTANCE | fl, abs(d) * MM, 0, 0, 0, 0))
+                for fl in flags]
+    if f.mode == "mid":
+        args = (_RP_MID, 0.0, _RP_MID, 0.0, 0, 0)
+        return [(seq(plane(f.base, 0, False), plane(f.base2, 1, True)), args),
+                (seq(plane(f.base2, 0, False), plane(f.base, 1, True)), args)]
+    if f.mode == "angle":
+        def axis():
+            select_axis(s, doc, st, f.axis, ctx, 1, True, owner=f.name, line=True)
+        a = float(f.angle) % 360.0
+        out = []
+        for ang in dict.fromkeys((round(a, 12), round((360.0 - a) % 360.0, 12))):
+            for fl in (0, _RP_FLIP):
+                out.append((seq(plane(f.base, 0, False), axis),
+                            (_RP_ANGLE | fl, math.radians(ang), _RP_COINCIDENT, 0.0, 0, 0)))
+        return out
+    if f.mode == "points":
+        sels = point_selectors(s, doc, st, f.points, f.name)
+
+        def pts(order):
+            def run():
+                for mark, k in enumerate(order):
+                    sels[k](mark, mark > 0)
+            return run
+        args = (_RP_COINCIDENT, 0.0, _RP_COINCIDENT, 0.0, _RP_COINCIDENT, 0.0)
+        return [(pts((0, 1, 2)), args), (pts((1, 0, 2)), args)]
+    if f.mode == "normal":
+        (sel,) = point_selectors(s, doc, st, [_plane_point(f, ctx)], f.name)
+        planar = f.axis.get("type") == "face" and our_face_point(ctx, f.axis["ref"])[1].kind not in (
+            "cylinder", "cone")
+        first = _RP_PARALLEL if planar else _RP_PERPENDICULAR    # parallel to a face = normal to its normal
+
+        def run():
+            select_axis(s, doc, st, f.axis, ctx, 0, False, owner=f.name)
+            sel(1, True)
+        return [(run, (first, 0.0, _RP_COINCIDENT, 0.0, 0, 0))]
+    raise _not_native(f"{f.name}: a {f.mode} reference plane is not transferred yet")
+
+
 def ref_plane(s, doc, f, ctx, st, attempt):
+    """Reference Plane with BauyrCAD's references and constraints (offset / coincident,
+    mid plane, at angle, three points, normal to a curve through a point). A plane changes no
+    volume, so its place AND normal are checked here (IRefPlane.Transform). If no variant
+    gives BauyrCAD's normal (an offset or 'normal' plane with Flip: SolidWorks keeps the
+    reference's direction), the plane in the right place is kept and a note says so; the
+    sketches on it are mapped onto it either way."""
     if attempt == 0:
         require(f, ctx)
         for spec in (f.base, f.base2):
-            if spec is not None and spec.get("type") == "explicit":
+            if f.mode in ("offset", "mid", "angle") and spec is not None and spec.get("type") == "explicit":
                 select_plane(s, doc, st, spec, ctx, owner=f.name)   # make the helper first
-    if attempt > 1:
+        if f.mode in ("angle", "normal"):
+            prepare_axis(s, doc, st, f.axis, ctx, f.name)
+    variants = _plane_variants(s, doc, f, ctx, st)
+    n = len(variants)
+    if attempt >= 2 * n:
         return NO_MORE
+    strict = attempt < n
+    sel, args = variants[attempt % n]
     fm = s.T(doc.FeatureManager, "IFeatureManager")
     doc.ClearSelection2(True)
+    sel()
     before = last_id(s, doc)
-    if f.mode == "offset":
-        select_plane(s, doc, st, f.base, ctx, 0, False, owner=f.name)
-        flip = (f.distance < 0) != bool(attempt)
-        rp = fm.InsertRefPlane(8 | (256 if flip else 0), abs(f.distance) * MM, 0, 0, 0, 0)
-    else:                                               # "mid" (require() refused the others)
-        select_plane(s, doc, st, f.base, ctx, 0, False, owner=f.name)
-        select_plane(s, doc, st, f.base2, ctx, 1, True, owner=f.name)
-        rp = fm.InsertRefPlane(128, 0, 128, 0, 0, 0)
+    rp = fm.InsertRefPlane(*args)
     doc.ClearSelection2(True)
     feat = newest_feature(s, doc, before) if rp is not None else None
     if feat is None:
-        raise _not_native(f"{f.name}: SolidWorks could not create the plane")
-    # a reference plane changes no volume: check its position ourselves
-    xf = s.T(s.T(rp, "IRefPlane").Transform, "IMathTransform")   # InsertRefPlane returns the plane
-    a = np.array(xf.ArrayData)
-    origin, normal = a[9:12] / MM, a[6:9]
-    want = f.result_plane
-    ok = (abs(abs(float(normal @ want.normal)) - 1) < 1e-7
-          and abs(float((origin - want.origin) @ want.normal)) < 1e-6)
-    if not ok:
+        return None
+    ok, reversed_ = plane_match(s, feat, f.result_plane)
+    if not ok or (reversed_ and strict):
         _delete(s, doc, feat)
         return None
-    st.planes.append((want, feat))
+    if reversed_:
+        st.report.notes.append(f"{f.name}: SolidWorks keeps the plane's normal the other way "
+                               "(it has no Flip Normal for this plane through the API); "
+                               "sketches and features on it are mapped onto it")
+    return feat
+
+
+def ref_axis(s, doc, f, ctx, st, attempt):
+    """Reference Axis: Cylindrical/Conical Face, One Line/Edge, Two Planes, Two Points and
+    Point and Face (a planar face's normal through its centre; a circular edge's axis). A
+    point + direction is an axis through two hidden helper points '<name> Points' (or the
+    two standard planes when it is the X / Y / Z axis)."""
+    from .core.refs import resolver
+    if attempt == 0:
+        require(f, ctx)
+    if attempt > 0:
+        return NO_MORE
+    p, d = f.result_axis
+    doc.ClearSelection2(True)
+    face_key = None
+    if f.mode == "face":
+        q, info = our_face_point(ctx, f.ref)
+        face = find_face(s, doc, q)
+        if info.kind in ("cylinder", "cone"):
+            face_key = _face_key(info)
+            select(s, doc, face, 0, False)
+        else:                         # planar: normal through its centre (Point and Face)
+            pt = helper_ref_point(s, doc, st, 4, lambda: select(s, doc, face, 0, False), f.name, p)
+            doc.ClearSelection2(True)
+            select(s, doc, face, 0, False)
+            select_feature(s, doc, pt, 0, True)
+    elif f.mode == "edge":
+        r = resolver(ctx)
+        info = r.edges[r.edge(f.ref)]
+        if info["kind"] == "line":
+            select(s, doc, find_edge(s, doc, info), 0, False)
+        else:
+            select_circle_axis(s, doc, st, info, f.name)
+    elif f.mode == "planes":
+        for spec in (f.base, f.base2):
+            if spec.get("type") == "explicit":
+                select_plane(s, doc, st, spec, ctx, owner=f.name)   # helpers first
+        select_plane(s, doc, st, f.base, ctx, 0, False, owner=f.name)
+        select_plane(s, doc, st, f.base2, ctx, 0, True, owner=f.name)
+    elif f.mode == "point_dir" and _std_line(p, d) is not None:
+        ext = s.T(doc.Extension, "IModelDocExtension")
+        for k, pl in enumerate(_STD_PAIRS[_std_line(p, d)]):
+            if not ext.SelectByID2(pl, "PLANE", 0, 0, 0, k > 0, 0, None, 0):
+                raise _not_native(f"{f.name}: {pl} could not be selected")
+    else:                             # two points (point + direction: the point and 10 mm on)
+        pts = f.points if f.mode == "points" else [p, np.asarray(p) + 10.0 * np.asarray(d)]
+        sels = point_selectors(s, doc, st, pts, f.name)
+        doc.ClearSelection2(True)
+        for k, sel in enumerate(sels):
+            sel(0, k > 0)
+    feat = _new_axis(s, doc, f"{f.name}")
+    if not same_line(*axis_line(s, feat), p, d):
+        _delete(s, doc, feat)
+        raise _not_native(f"{f.name}: SolidWorks placed the axis elsewhere")
+    if face_key is not None:
+        st.axes.setdefault(face_key, feat)          # later picks of the face use this axis
+    st.axes[("feature", f.id)] = feat
+    return feat
+
+
+_STD_PAIRS = {"x": ("Front Plane", "Top Plane"), "y": ("Front Plane", "Right Plane"),
+              "z": ("Top Plane", "Right Plane")}
+
+
+def _std_line(p, d):
+    """'x' / 'y' / 'z' when the line (p, d) is that global axis, else None."""
+    d = _unit(d)
+    for k, name in enumerate("xyz"):
+        if abs(abs(d[k]) - 1) < 1e-12 and float(np.linalg.norm(np.delete(np.asarray(p, float), k))) < 1e-9:
+            return name
+    return None
+
+
+def ref_point(s, doc, f, ctx, st, attempt):
+    """Reference Point: Arc Center (circular edge), Center of Face, or a point at
+    coordinates: 'On Point' of a hidden 3D-sketch point '<name> Points' (D1)."""
+    from .core.refs import resolver
+    if attempt == 0:
+        require(f, ctx)
+    if attempt > 0:
+        return NO_MORE
+    want = np.asarray(f.result_point, float)
+    doc.ClearSelection2(True)
+    if f.mode == "coords":
+        kind = 7                                            # swRefPointSketchPoint
+        _, pts = helper_points(s, doc, st, [want], f.name)
+        doc.ClearSelection2(True)
+        if not s.T(pts[0], "ISketchPoint").Select4(False, s.select_data(doc, 0)):
+            raise _not_native(f"{f.name}: its helper point could not be selected")
+    elif f.mode == "arc_center":
+        kind = 3                                            # swRefPointCenterEdge
+        r = resolver(ctx)
+        select(s, doc, find_edge(s, doc, r.edges[r.edge(f.ref)]), 0, False)
+    else:
+        kind = 4                                            # swRefPointFaceCenter
+        q, _ = our_face_point(ctx, f.ref)
+        select(s, doc, find_face(s, doc, q), 0, False)
+    fm = s.T(doc.FeatureManager, "IFeatureManager")
+    before = last_id(s, doc)
+    fm.InsertReferencePoint(kind, 0, 0.0, 1)
+    feat = newest_feature(s, doc, before)
+    doc.ClearSelection2(True)
+    if feat is None or feat.GetTypeName2() != "RefPoint":
+        raise _not_native(f"{f.name}: SolidWorks could not create the point")
+    got = ref_point_xyz(s, feat)
+    if np.linalg.norm(got - want) > 1e-6:
+        _delete(s, doc, feat)
+        raise _not_native(f"{f.name}: SolidWorks puts the point at {np.round(got, 4).tolist()}, "
+                          f"BauyrCAD at {np.round(want, 4).tolist()}")
+    st.ref_points.append((want, feat))
+    return feat
+
+
+def curve(s, doc, f, ctx, st, attempt):
+    """Curve Through XYZ Points (CurveInFile) with BauyrCAD's points - SolidWorks interpolates
+    them as BauyrCAD does (chord-length cubic spline, natural ends; a closed curve repeats its
+    first point) - or, for polyline=True, a 3D sketch of lines through them."""
+    from .core import modeling
+    if attempt == 0:
+        require(f, ctx)
+    if attempt > 0:
+        return NO_MORE
+    pts = [np.asarray(p, float) for p in f.points]
+    loop = pts + ([pts[0]] if f.closed else [])        # a closed curve repeats its first point
+    doc.ClearSelection2(True)
+    if f.polyline:
+        def draw(sm):
+            return [sm.CreateLine(*map(float, a * MM), *map(float, b * MM))
+                    for a, b in zip(loop[:-1], loop[1:])]
+        feat, segs = _sketch3d(s, doc, draw)
+        if any(x is None for x in segs):
+            _delete(s, doc, feat)
+            raise _not_native(f"{f.name}: SolidWorks rejected a line of the polyline")
+        sk = s.T(feat.GetSpecificFeature2(), "ISketch")
+        got = [np.array([q.X, q.Y, q.Z]) / MM for q in
+               (s.T(x, "ISketchPoint") for x in (sk.GetSketchPoints2() or ()))]
+        if (len(sk.GetSketchSegments() or ()) != len(loop) - 1
+                or len(got) != len(loop) - bool(f.closed)
+                or any(min(np.linalg.norm(g - p) for g in got) > 1e-6 for p in pts)):
+            _delete(s, doc, feat)
+            raise _not_native(f"{f.name}: SolidWorks did not join the polyline's lines at "
+                              "BauyrCAD's points")
+        return feat                   # straight lines between the same points: the same curve
+    before = last_id(s, doc)
+    doc.InsertCurveFileBegin()
+    for p in loop:
+        doc.InsertCurveFilePoint(*map(float, p * MM))
+    ok = doc.InsertCurveFileEnd()
+    feat = newest_feature(s, doc, before) if ok else None
+    if feat is None or feat.GetTypeName2() != "CurveInFile":
+        raise _not_native(f"{f.name}: SolidWorks could not create the curve")
+    data = s.T(feat.GetDefinition(), "IFreePointCurveFeatureData")
+    got = np.array(data.PointArray or ()).reshape(-1, 3) / MM
+    if got.shape != (len(loop), 3) or np.abs(got - np.array(loop)).max() > 1e-9:
+        _delete(s, doc, feat)
+        raise _not_native(f"{f.name}: SolidWorks stored other points")
+    edges = [s.T(e, "IEdge") for e in
+             (s.T(feat.GetSpecificFeature2(), "IReferenceCurve").GetSegments() or ())]
+    # the curve itself: BauyrCAD's curve sampled must lie on SolidWorks'
+    q = modeling.wire_points(f.result_wire, 24)
+    chord = float(np.sum(np.linalg.norm(np.diff(q, axis=0), axis=1)))
+    dev = max(min(_dist_to(e, np.asarray(p, float) * MM) for e in edges) for p in q) / MM
+    if dev > 1e-3 * chord:
+        _delete(s, doc, feat)
+        raise _not_native(f"{f.name}: SolidWorks' curve is up to {dev:.3g} mm away from BauyrCAD's")
+    if dev > 1e-6 * max(chord, 1.0):
+        st.report.notes.append(f"{f.name}: SolidWorks' curve through the same points differs "
+                               f"slightly from BauyrCAD's (up to {dev:.2g} mm)")
     return feat
 
 
@@ -1154,9 +1651,41 @@ def _place_hole_point(s, doc, feat, p_mm):
 _ISO_SIZES = ("M2", "M2.5", "M3", "M4", "M5", "M6", "M8", "M10", "M12", "M16", "M20", "M24")
 
 
+def curve_ends(s, feat) -> list:
+    """The end points (mm) of a SolidWorks curve feature's segments (an IReferenceCurve)."""
+    ends = []
+    for e in s.T(feat.GetSpecificFeature2(), "IReferenceCurve").GetSegments() or ():
+        cp = s.T(s.T(e, "IEdge").GetCurveParams3(), "ICurveParamData")
+        ends += [np.array(cp.StartPoint, float) / MM, np.array(cp.EndPoint, float) / MM]
+    return ends
+
+
+def curve_deviation(s, feat, wire) -> tuple:
+    """How far BauyrCAD's curve (a wire) is from a SolidWorks curve feature (an
+    IReferenceCurve: helix, curve through points...): (largest distance of BauyrCAD's sampled
+    points from SolidWorks' curve, largest distance between the two curves' end points, the
+    curve's length), mm. The end points catch what lying on the curve can't: a helix started
+    at another angle runs along the same spiral."""
+    from .core import modeling
+    edges = [s.T(e, "IEdge") for e in
+             (s.T(feat.GetSpecificFeature2(), "IReferenceCurve").GetSegments() or ())]
+    if not edges:
+        return math.inf, math.inf, 0.0
+    q = modeling.wire_points(wire, 24)
+    chord = float(np.sum(np.linalg.norm(np.diff(q, axis=0), axis=1)))
+    dev = max(min(_dist_to(e, np.asarray(p, float) * MM) for e in edges) for p in q) / MM
+    ends = curve_ends(s, feat)
+    ends_dev = max(min(float(np.linalg.norm(np.asarray(w) - x)) for x in ends)
+                   for w in modeling.wire_ends(wire))
+    return dev, ends_dev, chord
+
+
 def helix(s, doc, f, ctx, st, attempt):
     """Helix / Spiral on its circle sketch; an explicit helix gets a circle sketch made for
-    it ('<name> Sketch', a helper) on a plane normal to its axis."""
+    it ('<name> Sketch', a helper) on a plane normal to its axis. A helix has no volume, so it
+    is checked here against BauyrCAD's curve (every point on SolidWorks' helix, the same end
+    points): the derived Reverse Direction (SolidWorks grows it along its sketch normal) is
+    tried first, then the other direction / hand / start-angle readings."""
     if attempt == 0:
         require(f, ctx)
     if attempt > 0:
@@ -1166,9 +1695,9 @@ def helix(s, doc, f, ctx, st, attempt):
     doc.ClearSelection2(True)
     if f.sketch:
         sk = st.features.get(f.sketch)
-        if sk is None:
+        if sk is None or f.sketch not in st.sketches:
             raise _not_native(f"{f.name}: its sketch was not transferred")
-        select_feature(s, doc, sk, 0, False)
+        m = st.sketches[f.sketch][1]
     else:
         axis = np.asarray(f.axis, float)
         axis = axis / np.linalg.norm(axis)
@@ -1189,20 +1718,64 @@ def helix(s, doc, f, ctx, st, attempt):
         sk = s.T(doc.FeatureByPositionReverse(0), "IFeature")
         name = helper_name(st, f.name, "Sketch")
         if not set_name(s, doc, sk, name, st):
-            st.warn(f"{name}: SolidWorks refused the helper's name (it is called {sk.Name})")
+            st.warn(f"{name}: SolidWorks refused the helix sketch's name (it is called {sk.Name})")
         st.own(s, sk)
         st.helpers.append(sk.Name)
-        doc.ClearSelection2(True)
-        select_feature(s, doc, sk, 0, False)
     pitch, turns = f.pitch_turns()
     by = {"pitch_revolutions": 0, "height_revolutions": 1, "height_pitch": 2}[f.defined_by]
-    doc.InsertHelix(bool(f.reverse), bool(f.left_hand), False, False, by, pitch * turns * MM,
-                    pitch * MM, float(turns), 0.0, math.radians(f.start_angle))
-    feat = s.T(doc.FeatureByPositionReverse(0), "IFeature")
-    if feat is None or feat.GetTypeName2() != "Helix":
-        raise _not_native(f"{f.name}: SolidWorks could not create the helix")
-    doc.ClearSelection2(True)
-    return feat
+    centre, axis = _helix_axis(f, ctx)
+    from .core import modeling
+    start = modeling.wire_ends(f.result_wire)[0]
+    radial = start - centre - np.dot(start - centre, axis) * axis
+    # SolidWorks grows the helix along its sketch normal unless reversed, and reads the hand
+    # about that normal; its start angle has its own zero (not the sketch's x axis): it is
+    # read from a first try and corrected (the sense of SolidWorks' angle is tried both ways)
+    rev = bool(f.reverse) ^ (m.ccw < 0)
+    got = []
+    debug = os.environ.get("BAUYRCAD_SW_DEBUG")
+    for r in (rev, not rev):
+        for cw in (bool(f.left_hand) ^ r, not (bool(f.left_hand) ^ r)):
+            angles, tried = [float(f.start_angle)], set()
+            while angles:
+                ang = angles.pop(0) % 360.0
+                if round(ang, 9) in tried:
+                    continue
+                tried.add(round(ang, 9))
+                doc.ClearSelection2(True)
+                select_feature(s, doc, sk, 0, False)
+                doc.InsertHelix(r, cw, False, False, by, pitch * turns * MM, pitch * MM,
+                                float(turns), 0.0, math.radians(ang))
+                feat = s.T(doc.FeatureByPositionReverse(0), "IFeature")
+                if feat is None or feat.GetTypeName2() != "Helix" or feat.GetID() in st.owned:
+                    raise _not_native(f"{f.name}: SolidWorks could not create the helix")
+                dev, ends, chord = curve_deviation(s, feat, f.result_wire)
+                if debug:
+                    print(f"[sw] {f.name}: reverse={r} clockwise={cw} start={ang:g}: on-curve "
+                          f"{dev:.3g} mm, ends {ends:.3g} mm (length {chord:.4g})", flush=True)
+                if max(dev, ends) <= 1e-4 * chord + 1e-6:
+                    doc.ClearSelection2(True)
+                    return feat
+                got.append(max(dev, ends))
+                if len(tried) == 1:                  # where SolidWorks started: correct by it
+                    p = min(curve_ends(s, feat), key=lambda q: abs(np.dot(q - start, axis)))
+                    rr = p - centre - np.dot(p - centre, axis) * axis
+                    d = math.degrees(math.atan2(np.dot(np.cross(rr, radial), axis),
+                                                np.dot(rr, radial)))
+                    angles += [ang - d, ang + d] if r else [ang + d, ang - d]
+                _delete(s, doc, feat)
+    raise _not_native(f"{f.name}: SolidWorks' helix does not run where BauyrCAD's does "
+                      f"(off by {min(got):.3g} mm at best)")
+
+
+def _helix_axis(f, ctx) -> tuple:
+    """(centre, unit axis) of a BauyrCAD helix, world mm (as HelixFeature.execute)."""
+    if f.sketch:
+        sf = ctx.features.get(f.sketch)
+        c = next(e for e in sf.sketch.curves(include_construction=True) if e.kind == "circle")
+        return (np.asarray(sf.plane.to_world(*sf.sketch.pt(c.center)), float),
+                np.asarray(sf.plane.normal, float))
+    axis = np.asarray(f.axis, float)
+    return np.asarray(f.center, float), axis / np.linalg.norm(axis)
 
 
 def sweep(s, doc, f, ctx, st, attempt):
@@ -1248,9 +1821,6 @@ def loft(s, doc, f, ctx, st, attempt):
 
 HANDLERS = {"extrude": extrude, "revolve": revolve,
             "fillet": fillet, "chamfer": chamfer, "shell": shell, "draft": draft, "helix": helix,
-            "ref_plane": ref_plane, "linear_pattern": linear_pattern,
-            "circular_pattern": circular_pattern, "mirror": mirror, "hole": hole,
-            "sweep": sweep, "loft": loft}
-# reference features without a SolidWorks counterpart yet: skipped with a (blocking) warning;
-# the strict pre-check refuses them before SolidWorks starts
-SKIPPED = ("ref_axis", "ref_point", "curve")
+            "ref_plane": ref_plane, "ref_axis": ref_axis, "ref_point": ref_point, "curve": curve,
+            "linear_pattern": linear_pattern, "circular_pattern": circular_pattern,
+            "mirror": mirror, "hole": hole, "sweep": sweep, "loft": loft}

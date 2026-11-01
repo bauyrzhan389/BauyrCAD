@@ -20,16 +20,19 @@ BauyrCAD is built on the following open-source components. Binary distributions
 ## What this means for distributing BauyrCAD
 
 * BauyrCAD's own source code is MIT licensed.
-* Because the Windows bundle includes **Gmsh (GPL)**, the bundle as a whole must be distributed
-  under GPL-compatible terms: provide the source code (this repository) along with the binaries.
-  That is straightforward for an open-source release.
+* Binary releases containing **Gmsh (GPL)** must meet the applicable GPL requirements,
+  including corresponding source and licence notices. A link to BauyrCAD's own source
+  alone does not establish compliance for all bundled dependencies.
 * For a **closed-source / commercial** release, either replace the mesher (the whole Gmsh
   dependency is isolated in `bauyrcad/fea/mesher.py`; Netgen is LGPL) or buy a commercial
   Gmsh license from its authors.
 * The Intel MKL runtime may be redistributed under the Intel Simplified Software License;
   keep its license text with the binaries.
-* SolidWorks is **not** part of BauyrCAD in any form: Export to SolidWorks uses the user's own
-  installation through its COM API, and the `.sldprt` reader contains no Dassault code. See the
-  README's *Trademarks and interoperability* section.
-* Qt/PySide6 (LGPL-3.0) is used as dynamically loaded libraries, which satisfies the LGPL as long
-  as users can replace them (the one-folder build keeps the DLLs as separate files).
+* BauyrCAD does not bundle SolidWorks executables, DLLs, SDKs or decompiler output.
+  The offline exporter does include SolidWorks model seed files. Their provenance and
+  redistribution rights require separate review; the MIT licence for BauyrCAD's own code
+  does not grant rights to third-party material. COM export uses the user's installation.
+  See the README's *Trademarks and interoperability* section.
+* Qt/PySide6 (LGPL-3.0) is dynamically loaded. Keeping DLLs separate supports replacement,
+  but does not by itself satisfy every LGPL obligation. Binary releases must also address
+  applicable notices, source availability and users' modification/relinking rights.

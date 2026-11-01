@@ -118,20 +118,36 @@ def available() -> bool:
     return install_dir() is not None
 
 
-def _sw_pids() -> set:
-    """Process ids of running SolidWorks instances."""
+def _sw_pids():
+    """Process ids of running SolidWorks instances, or None when they cannot be listed
+    (tasklist failed or timed out): callers must then assume the user's SolidWorks may be
+    running (fail closed)."""
     try:
         import subprocess
-        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq SLDWORKS.exe", "/NH", "/FO", "CSV"],
-                             capture_output=True, text=True, timeout=20).stdout
-        return {int(line.split('","')[1]) for line in out.splitlines()
+        r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq SLDWORKS.exe", "/NH", "/FO", "CSV"],
+                           capture_output=True, text=True, timeout=20)
+        if r.returncode != 0:
+            return None
+        return {int(line.split('","')[1]) for line in r.stdout.splitlines()
                 if line.startswith('"SLDWORKS.exe"')}
     except Exception:  # noqa: BLE001
-        return set()
+        return None
 
 
 def _running() -> bool:
-    return bool(_sw_pids())
+    """True when SolidWorks runs, or when that cannot be determined."""
+    pids = _sw_pids()
+    return pids is None or bool(pids)
+
+
+def _owns_instance(before, after) -> tuple:
+    """(own, new pids) after DispatchEx: the instance is ours only when both process probes
+    worked and either a new SLDWORKS.exe appeared or none ran before. A failed probe means
+    the user's SolidWorks may be the one we attached to: never hide, close or exit it."""
+    if before is None or after is None:
+        return False, set()
+    new = after - before
+    return bool(new) or not before, new
 
 
 def _writable_gen_py():
@@ -215,8 +231,7 @@ class Session:
                         "about toolbar settings or the licence: start SolidWorks once by hand, "
                         "close the message, exit SolidWorks and export again.") from e
                 raise
-            self._pids = _sw_pids() - before           # an instance we started ourselves
-            self._own = bool(self._pids) or not before
+            self._own, self._pids = _owns_instance(before, _sw_pids())
             self.sw = self.T(self._raw, "ISldWorks")
             if self._own:
                 self.sw.Visible = self.visible
@@ -269,7 +284,7 @@ class Session:
             gc.collect()
             if self._own:
                 for _ in range(60):                     # ExitApp returns before it is gone
-                    if not (_sw_pids() & self._pids):
+                    if not ((_sw_pids() or set()) & self._pids):
                         break
                     time.sleep(0.5)
             if self._com:
@@ -360,16 +375,29 @@ class PartReport:
     attempts: dict = field(default_factory=dict)   # step -> handler attempt kept (0 = predicted)
 
 
-def _volume(s, doc) -> float:
+def _mass(s, doc) -> tuple:
+    """(volume mm³, centre of mass mm) of a part's solid bodies, at SolidWorks' Higher mass
+    property accuracy (swMassPropertyAccuracyLevel_Higher). The default accuracy is off by up
+    to ~3e-7 of the whole body on curved faces cut at an angle or splines; Higher agrees with
+    OpenCASCADE to ~1e-9, which lets the per-step check stay relative to the step itself.
+    Clears the selection (IMassProperty2 measures the selected bodies, else all of them)."""
     ext = s.T(doc.Extension, "IModelDocExtension")
-    mp = s.T(ext.CreateMassProperty(), "IMassProperty")
-    return 0.0 if mp is None else mp.Volume / MM ** 3
+    doc.ClearSelection2(True)
+    mp = s.T(ext.CreateMassProperty2(), "IMassProperty2")
+    if mp is None:                                  # no solid body
+        return 0.0, np.zeros(3)
+    mp.UseSystemUnits = True
+    mp.AccuracyLevel = 2                            # swMassPropertyAccuracyLevel_Higher
+    mp.Recalculate()
+    return mp.Volume / MM ** 3, np.array(mp.CenterOfMass) / MM
+
+
+def _volume(s, doc) -> float:
+    return _mass(s, doc)[0]
 
 
 def _center(s, doc) -> np.ndarray:
-    ext = s.T(doc.Extension, "IModelDocExtension")
-    mp = s.T(ext.CreateMassProperty(), "IMassProperty")
-    return np.zeros(3) if mp is None else np.array(mp.CenterOfMass) / MM
+    return _mass(s, doc)[1]
 
 
 def _close_enough(a, b, rel):
@@ -662,8 +690,9 @@ def _map_points(s, doc, sk, m, sf, report):
     """Our point ids -> SolidWorks sketch points, from the entities' roles. A point BauyrCAD
     shares between curves (connected ends, an arc centre on a line end, offset arcs on one
     centre) must be ONE SolidWorks point: SolidWorks joins touching ends itself, anything it
-    left apart is merged (sgMERGEPOINTS). A Point entity on a curve's point is tied to it
-    with Coincident (SolidWorks keeps sketch points separate)."""
+    left apart is merged (sgMERGEPOINTS). A Point entity on a curve's point (the GUI's
+    Point tool snapped to an end or centre) is tied to it with a checked Coincident:
+    SolidWorks keeps the two points, so the Point entity count still matches."""
     from .core.sketch import PointEntity
 
     def curve_points():
@@ -694,11 +723,18 @@ def _map_points(s, doc, sk, m, sf, report):
             if on is None:
                 m.pts[e.p] = pt
             elif on.GetID() != pt.GetID():
+                # SolidWorks keeps both points (the Point entity stays a user point) and
+                # adds the Coincident; it must really be there, or the Point would be free
+                before_rel = _sketch_relations(s, doc)
                 doc.ClearSelection2(True)
-                pt.Select4(True, None)
-                on.Select4(True, None)
+                if not (pt.Select4(True, None) and on.Select4(True, None)):
+                    raise _NotNative(f"{sf.name}: a Point entity on a curve's point could "
+                                     "not be selected")
                 doc.SketchAddConstraints("sgCOINCIDENT")
                 doc.ClearSelection2(True)
+                if not (_sketch_relations(s, doc) - before_rel)[9]:
+                    raise _NotNative(f"{sf.name}: SolidWorks did not tie a Point entity to "
+                                     "the curve point it sits on")
     # different BauyrCAD points SolidWorks joined because they lie on top of each other
     related = {frozenset(i for _, i in c.refs) for c in sk.constraints
                if c.type == "coincident" and all(k == "p" for k, _ in c.refs)}
@@ -1403,16 +1439,28 @@ def _history(bdoc, history=None) -> _History:
 
 
 # Relative tolerances on a feature's own change of volume and of first moment (D3): exact
-# by default. SolidWorks' splines through BauyrCAD's points are BauyrCAD's curve exactly
-# (_SPLINE is only a margin); it shapes blends between different profiles a little
-# differently from OpenCASCADE, and draws font outlines its own way (a few % of the letters'
-# area, the baseline and spacing agree to ~0.1 mm).
+# by default. SolidWorks' splines through BauyrCAD's points are BauyrCAD's curve to a tiny
+# amount along the curve (_SPLINE is a margin, _SPLINE_GAP the absolute part); it shapes
+# blends between different profiles a little differently from OpenCASCADE, and draws font
+# outlines its own way (a few % of the letters' area, the baseline and spacing agree to
+# ~0.1 mm).
 _EXACT = 1e-5
 _SPLINE = 1e-4
+# Plus, for a step that depends on a sketch spline, an absolute allowance (D8: the spline's
+# shape difference is a note, never a refusal): this distance (mm) times the free-form face
+# area of BauyrCAD's result. SolidWorks' spline through BauyrCAD's points and its mass
+# integration of the spline faces differ from OpenCASCADE's exact measure by an amount that
+# follows the spline (seen: 0.006 mm³ on 66 mm² of spline face, ~1e-4 mm), not the
+# feature's volume, so a narrow spline strip would fail a purely relative tolerance.
+_SPLINE_GAP = 1e-3
 _TEXT = 0.1             # letters' volume (seen: 0.8 - 5.7 %), plus their centroid within
 _TEXT_PLACE = 0.1       # this fraction of the text height
 _FEATURE_TOL = {"sweep": 1e-3, "loft": 1e-2, "boundary": 1e-2}
-_MEASURE = 2e-6     # volume / centroid agreement of the two kernels, relative to the whole body
+# What the two kernels' mass properties may disagree by on an exact model, relative to the
+# whole body (measured: ~2e-9 at SolidWorks' Higher accuracy, see _mass). Only a noise floor:
+# each step's own tolerance is relative to its own change of volume (D3), and the first
+# moment is taken about the step's neighbourhood, not the world origin.
+_MEASURE = 1e-8
 
 
 def _uses_sketch(f, by_id, pred, seen=None) -> bool:
@@ -1463,16 +1511,35 @@ def _feature_tol(f, by_id) -> float:
     return tol
 
 
-def _moments(shape):
-    """(volume, first moment = volume * centroid) of a shape, mm."""
+def _measure(shape) -> tuple:
+    """(volume, first moment = volume * centroid, (adaptive volume, adaptive first moment)) of
+    a BauyrCAD shape, mm: measured on the shape split at its B-spline knots
+    (geometry.accurate_mass_properties), so a spline-bounded step is judged against its exact
+    volume, not against OpenCASCADE's whole-face integration error (which does not shrink with
+    the feature: a narrow spline strip would fail on it alone)."""
     from .core import geometry
     if shape is None:
-        return 0.0, np.zeros(3)
-    v = geometry.volume(shape)
-    return v, v * geometry.center_of_mass(shape)
+        return 0.0, np.zeros(3), (0.0, np.zeros(3))
+    (v, c), (va, ca) = geometry.accurate_mass_properties(shape)
+    return v, v * c, (va, va * ca)
 
 
-def _size(*shapes) -> float:
+def _moments(shape):
+    """(volume, first moment = volume * centroid) of a shape, mm (accurately, _measure)."""
+    v, m, _ = _measure(shape)
+    return v, m
+
+
+def _measuring_noise(measured, centre) -> tuple:
+    """How uncertain the accurate measure (_measure) still is: the difference between its fixed
+    Gauss and its adaptive integration of the volume and of the first moment about ``centre``
+    (0 on analytic faces and on split B-spline spans, to round-off)."""
+    v, m, (va, ma) = measured
+    return abs(va - v), float(np.linalg.norm((ma - va * centre) - (m - v * centre)))
+
+
+def _box(*shapes) -> tuple:
+    """(centre, diagonal) of the shapes' common bounding box (mm; diagonal at least 1)."""
     from .core import geometry
     lo, hi = [], []
     for sh in shapes:
@@ -1481,13 +1548,18 @@ def _size(*shapes) -> float:
             lo.append(a)
             hi.append(b)
     if not lo:
-        return 1.0
-    return max(float(np.linalg.norm(np.max(hi, axis=0) - np.min(lo, axis=0))), 1.0)
+        return np.zeros(3), 1.0
+    lo, hi = np.min(lo, axis=0), np.max(hi, axis=0)
+    return (lo + hi) / 2, max(float(np.linalg.norm(hi - lo)), 1.0)
+
+
+def _size(*shapes) -> float:
+    return _box(*shapes)[1]
 
 
 def _sw_moments(s, doc):
-    v = _volume(s, doc)
-    return v, v * _center(s, doc)
+    v, c = _mass(s, doc)
+    return v, v * c
 
 
 def _native_part(s, hist, report):
@@ -1531,10 +1603,6 @@ def _native_part(s, hist, report):
                 st.own(s, feat)
                 st.sketches[f.id] = (feat, m, f)
                 st.features[f.id] = feat
-            elif f.TYPE in swf.SKIPPED:
-                report.warnings.append(f"{f.name}: {f.TYPE} reference geometry is not "
-                                       "transferred yet")
-                continue
             elif f.TYPE in swf.HANDLERS:
                 st.features[f.id] = _native_feature(s, doc, hist, i, f, st, swf, report)
             else:
@@ -1553,18 +1621,36 @@ def _native_feature(s, doc, hist, i, f, st, swf, report):
     tolerance relative to the feature's own change (D3)."""
     ctx = hist.ctx(i)
     want = hist.after[i]
-    v1, m1 = _moments(want)
-    v0, m0 = _moments(ctx.body)
+    meas1, meas0 = _measure(want), _measure(ctx.body)
+    v1, m1, _ = meas1
+    v0, m0, _ = meas0
+    # first moments about the centre of the step's neighbourhood, not the world origin: an
+    # accepted volume difference must not turn into a placement error just because the part
+    # sits far from the origin (moving the model changes nothing below)
+    centre, size = _box(want, ctx.body)
+    m1, m0 = m1 - v1 * centre, m0 - v0 * centre
     dv_want, dm_want = v1 - v0, m1 - m0
-    size = _size(want, ctx.body)
-    vref = max(v1, v0, 1.0)
-    rel = _feature_tol(f, hist.by_id)
-    floor = _MEASURE * vref + 1e-6
-    vol_tol = rel * abs(dv_want) + floor
-    mom_tol = (rel * abs(dv_want) + floor) * size
-    exact_tol = _EXACT * abs(dv_want) + floor
-    text_h = _text_height(f, hist.by_id)
     sv0, sm0 = _sw_moments(s, doc)
+    sm0 = sm0 - sv0 * centre
+    # the noise floor: the kernels' measuring agreement (tiny, relative to the body), plus the
+    # difference SolidWorks' model ALREADY had before this step (an earlier loft or spline
+    # surface it shapes its own way; 0 on an exact model), which this step may carry or undo
+    # and OpenCASCADE's own measuring uncertainty on the two bodies (0 on analytic faces: it is
+    # measured, so it only loosens the check where B-spline faces make the measure uncertain)
+    nv1, nm1 = _measuring_noise(meas1, centre)
+    nv0, nm0 = _measuring_noise(meas0, centre)
+    floor_v = _MEASURE * max(v1, v0, 1.0) + 1e-6 + abs(sv0 - v0) + nv1 + nv0
+    floor_m = ((_MEASURE * max(v1, v0, 1.0) + 1e-6) * size + float(np.linalg.norm(sm0 - m0))
+               + nm1 + nm0)
+    rel = _feature_tol(f, hist.by_id)
+    gap = 0.0                  # the spline allowance (a difference within it is a note)
+    if _uses_spline(f, hist.by_id):
+        from .core import geometry
+        gap = _SPLINE_GAP * geometry.freeform_area(want)
+    vol_tol = rel * abs(dv_want) + floor_v + gap
+    mom_tol = (rel * abs(dv_want) + gap) * size + floor_m
+    exact_tol = _EXACT * abs(dv_want) + floor_v
+    text_h = _text_height(f, hist.by_id)
     attempt, got = 0, []
     debug = os.environ.get("BAUYRCAD_SW_DEBUG")
     while True:
@@ -1580,6 +1666,7 @@ def _native_feature(s, doc, hist, i, f, st, swf, report):
             got.append("no new feature")
             continue
         sv1, sm1 = _sw_moments(s, doc)
+        sm1 = sm1 - sv1 * centre
         dv_err = abs((sv1 - sv0) - dv_want)
         dm_err = float(np.linalg.norm((sm1 - sm0) - dm_want))      # mm^4
         ok = dv_err <= vol_tol and dm_err <= mom_tol
@@ -1597,7 +1684,8 @@ def _native_feature(s, doc, hist, i, f, st, swf, report):
                       f"(tol {_TEXT_PLACE * text_h:.3g})", flush=True)
         if debug:
             print(f"[sw] {f.name} attempt {attempt - 1}: dV err {dv_err:.3g} (tol {vol_tol:.3g}) "
-                  f"dM err {dm_err:.3g} (tol {mom_tol:.3g}) -> {'ok' if ok else 'rejected'}",
+                  f"dM err {dm_err:.3g} (tol {mom_tol:.3g}) -> {'ok' if ok else 'rejected'} "
+                  f"[SW-OCC before {sv0 - v0:.3g}, after {sv1 - v1:.3g}]",
                   flush=True)
         if ok:
             if dv_err > exact_tol:
@@ -1753,13 +1841,15 @@ def _check_final(s, doc, hist, report):
             raise _NotNative("SolidWorks made a solid body where BauyrCAD has none")
         return
     rel = max([_feature_tol(f, hist.by_id) for f in hist.doc.features] + [_EXACT])
-    v_ref = geometry.volume(body)
-    if abs(report.volume - v_ref) > rel * v_ref + _MEASURE * v_ref + 1e-6:
+    v_ref, m_ref = _moments(body)                  # accurate on spline faces too
+    gap = (_SPLINE_GAP * geometry.freeform_area(body)
+           if any(_uses_spline(f, hist.by_id) for f in hist.doc.features) else 0.0)
+    if abs(report.volume - v_ref) > rel * v_ref + _MEASURE * v_ref + 1e-6 + gap:
         raise _NotNative(f"final volume differs (SolidWorks {report.volume:.3f} mm³, "
                          f"BauyrCAD {v_ref:.3f} mm³)")
     size = _size(body)
-    off = float(np.linalg.norm(_center(s, doc) - geometry.center_of_mass(body)))
-    if off > (rel + _MEASURE) * size + 1e-6:
+    off = float(np.linalg.norm(_center(s, doc) - m_ref / v_ref))
+    if off > (rel + _MEASURE + gap / max(v_ref, 1e-9)) * size + 1e-6:
         raise _NotNative(f"the final centre of mass is {off:.3g} mm away from BauyrCAD's")
 
 

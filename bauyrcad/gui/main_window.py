@@ -220,7 +220,10 @@ class MainWindow(QMainWindow):
                           "Look straight at the selected face / active sketch")
         self.a_fit = A("Zoom to Fit", "fit", lambda: self.viewer.fit(), None,
                        "Zoom to fit (command: Z / ZE)")
-        self.a_export_sw = A("Export to SolidWorks...", "solidworks", self.export_solidworks, None,
+        self.a_export_sw_offline = A("Export editable SolidWorks part (offline)...", "solidworks",
+                                    self.export_solidworks_offline, None,
+                                    "Write a supported feature tree without running SolidWorks; unsupported parts are rejected")
+        self.a_export_sw = A("Export using installed SolidWorks...", "solidworks", self.export_solidworks, None,
                              "Native SolidWorks part (.SLDPRT) with the feature tree rebuilt, made "
                              "by the SolidWorks installed on this PC")
         self.a_parameters = A("Parameters and Equations", "", self.edit_parameters)
@@ -242,7 +245,7 @@ class MainWindow(QMainWindow):
                   self.a_open_drw, self.a_save, self.a_save_as, self.a_part_properties,
                   self.a_reload, self.a_autoreload,
                   None, self.a_import,
-                  self.a_export, self.a_export_sw, None, self.a_exit):
+                  self.a_export, self.a_export_sw_offline, self.a_export_sw, None, self.a_exit):
             m.addSeparator() if a is None else m.addAction(a)
         m = mb.addMenu("&Edit")
         for a in (self.a_undo, self.a_redo, None, self.a_parameters, None, self.a_delete):
@@ -641,6 +644,7 @@ class MainWindow(QMainWindow):
         R("NORMALTO", "Normal to", self.view_normal_to, ("NT",), "normal_to")
         R("MEASURE", "Measure", self.start_measure, ("MEA", "DIST"), "measure")
         R("SOLIDWORKS", "Export to SolidWorks (.SLDPRT)", self.export_solidworks, ("SW", "SLDPRT"), "solidworks")
+        R("SWOFFLINE", "Export editable SolidWorks part without SolidWorks", self.export_solidworks_offline, (), "solidworks")
         R("VIEWSELECTOR", "View selector", self.viewer.show_view_selector, ("VS",), "iso")
         R("STUDY", "New study", self.new_study, ("ST",), "study")
         R("MATERIAL", "Material", self.edit_material, ("MAT",), "material")
@@ -1323,6 +1327,27 @@ class MainWindow(QMainWindow):
             items.append(("ref_plane", "Edit Plane", lambda: self.edit_feature(spec["id"])))
         self.context_bar.show_at(pos or QCursor.pos(), items)
 
+    def export_solidworks_offline(self, path=None):
+        """Offline native-tree export, with no silent solid-body fallback."""
+        if isinstance(path, bool):
+            path = None
+        if not self.doc.has_body():
+            QMessageBox.information(self, "Export", "There is no solid body to export yet.")
+            return None
+        if path is None:
+            stem = self.doc.path.stem if self.doc.path else "Part1"
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Export editable SolidWorks part (offline)",
+                str(Path(self._last_dir()) / f"{stem}.SLDPRT"),
+                exchange.FORMATS['sldprt_features'].filter)
+            if not path:
+                return None
+        path = str(path)
+        if Path(path).suffix.lower() != '.sldprt':
+            path += '.SLDPRT'
+        self._remember_dir(path)
+        return path if self._export_to(path, exchange.FORMATS['sldprt_features']) else None
+
     def export_solidworks(self, path=None):
         """File > Export to SolidWorks: native .SLDPRT with an editable feature tree."""
         if isinstance(path, bool):  # QAction.triggered supplies its checked state
@@ -1333,10 +1358,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Export to SolidWorks", "There is nothing to export yet.")
             return None
         if not solidworks.available():
-            QMessageBox.warning(self, "Export to SolidWorks",
-                                "SolidWorks is not installed on this PC (it builds the .SLDPRT). "
-                                "Use STEP instead: File > Export.")
-            return None
+            return self._export_parasolid_instead(path)
         # the known gaps, before SolidWorks starts; the export then works on a private copy
         # (the worker thread never touches the document being edited here)
         from ..core.document import Document
@@ -1353,6 +1375,27 @@ class MainWindow(QMainWindow):
                 return None
         return solidworks_export.run(self, "Export to SolidWorks",
                                      lambda: solidworks.export_part_file(doc, path, require_native=True))
+
+    def _export_parasolid_instead(self, path=None):
+        """No SolidWorks here to build a .SLDPRT with a feature tree: BauyrCAD writes a
+        .SLDPRT holding the exact solid itself (or a Parasolid .x_t)."""
+        if QMessageBox.question(
+                self, "Export to SolidWorks",
+                "This export method requires installed SolidWorks. For supported editable parts, "
+                "use File > Export editable SolidWorks part (offline).\n\n"
+                "Export a SolidWorks part (.SLDPRT) with the exact solid as an "
+                "Imported body instead (or a Parasolid .x_t)? BauyrCAD writes it itself; "
+                "FeatureWorks can recognise the features in SolidWorks.") != QMessageBox.Yes:
+            return None
+        formats = [exchange.FORMATS["sldprt"], exchange.FORMATS["xt"]]
+        if path is None or Path(path).suffix.lower() not in (".sldprt", ".x_t"):
+            stem = self.doc.path.stem if self.doc.path else "Part1"
+            path, _ = QFileDialog.getSaveFileName(self, "Export to SolidWorks",
+                                                  str(Path(self._last_dir()) / f"{stem}.SLDPRT"),
+                                                  ";;".join(f.filter for f in formats))
+            if not path:
+                return None
+        return path if self._export_to(path, exchange.export_format_for(path)) else None
 
     def edit_parameters(self):
         if self.command is not None:
@@ -2059,13 +2102,16 @@ class MainWindow(QMainWindow):
             return False
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            self.doc.export(path, fmt.key)
+            report = self.doc.export(path, fmt.key, require_native=True) if fmt.key == 'sldprt_features' else self.doc.export(path, fmt.key)
         except Exception as e:
             QApplication.restoreOverrideCursor()
             QMessageBox.critical(self, "Export", f"Could not export {path}:\n\n{e}")
             return False
         QApplication.restoreOverrideCursor()
-        self.status(f"Exported {fmt.label}: {path}")
+        if isinstance(report, dict) and report.get('warnings'):
+            self.status(f"Exported solid body: {path}. " + '; '.join(report['warnings']))
+        else:
+            self.status(f"Exported {fmt.label}: {path}")
         return True
 
     file_export_step = file_export

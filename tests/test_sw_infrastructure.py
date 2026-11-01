@@ -97,6 +97,69 @@ def test_a_mirrored_result_is_rejected_by_the_first_moment(sw, tmp_path, monkeyp
     sw.close(doc)
 
 
+# ---- VAL-01 on a large body: the tolerance is relative to the STEP, not the whole body, so a
+# small feature on a big plate patterned the wrong way or chamfered the swapped way is rejected
+def big_plate_parts():
+    pat = Part("plate-pattern")
+    s = pat.sketch("front"); s.rect((0, 0), (200, 200)); pat.extrude(s, 25)
+    s2 = pat.sketch(on=pat.face("+z")); s2.circle((20, 20), d=3); boss = pat.extrude(s2, 2)
+    pat.pattern_linear(boss, direction="-x", spacing=4, count=2)
+    ch = Part("plate-chamfer")
+    s = ch.sketch("front"); s.rect((0, 0), (200, 200)); ch.extrude(s, 25)
+    ch.chamfer([ch.edge((100, 0, 25))], d=1, d2=3)
+    return [(pat, "linear_pattern", "LPattern1", ("LPattern", "LocalLPattern")),
+            (ch, "chamfer", "Chamfer1", ("Chamfer",))]
+
+
+@pytest.mark.parametrize("swap", [False, True])
+def test_small_steps_on_a_large_body_are_placed_exactly(sw, tmp_path, monkeypatch, swap):
+    """A 3 mm boss patterned 4 mm the wrong way moves the 1e6 mm³ plate's centroid by only
+    1e-4 mm: the old body-relative floor (2 mm³, ~570 mm^4) let that through. The handler's
+    first two tries are run in both orders, so one export meets the wrong result first and
+    must reject it."""
+    kept = []
+    for part, kind, name, types in big_plate_parts():
+        real = swf.HANDLERS[kind]
+
+        def swapped(s, doc, f, ctx, st, attempt, real=real):
+            if swap and attempt < 2:
+                attempt = 1 - attempt
+            return real(s, doc, f, ctx, st, attempt)
+        monkeypatch.setitem(swf.HANDLERS, kind, swapped)
+        rep = export(sw, part, tmp_path, f"{part.name}-{swap}")
+        kept.append(rep.attempts[name])
+        steps = [(f.name, {"sketch": "ProfileFeature"}.get(f.TYPE)) for f in part.doc.features]
+        doc = check_saved_part(sw, rep, part.doc.body, steps)
+        assert type_of(feature(sw, doc, name)) in types
+        # the step's material where BauyrCAD has it: the whole body's centroid to 1e-6 mm
+        # (a wrong pattern / swapped chamfer is 1e-4 / 3e-3 mm off)
+        assert np.linalg.norm(solidworks._center(sw, doc)
+                              - geometry.center_of_mass(part.doc.body)) < 1e-6, name
+        sw.close(doc)
+        monkeypatch.setitem(swf.HANDLERS, kind, real)
+    assert 1 in kept, kept            # a wrong first result was met and rejected (log: 113 /
+    #                                   283 mm^4 off against a tolerance of ~3)
+
+
+# ---- VAL-01: placement is checked about the step's neighbourhood, so a loft / sweep modelled
+# far from the origin exports exactly as it does at the origin --------------------------------
+def test_blends_far_from_the_origin_export_strictly(sw, tmp_path):
+    lo = Part("loft-far")
+    x0 = 1000.0
+    a = lo.sketch("top"); a.rect((x0 - 20, -20), (x0 + 20, 20))
+    b = lo.sketch(lo.plane("top", offset=30)); b.circle((x0, 0), d=20)
+    lo.loft([a, b])
+    path = lo.sketch("front"); path.polyline([(x0 - 15, 30), (x0 - 15, 45), (x0 + 15, 45)])
+    lo.sweep(path, d=6)
+    rep = export(sw, lo, tmp_path)
+    assert all("differs slightly" in n for n in rep.notes), rep.notes
+    kinds = {"Plane1": "RefPlane", "Loft1": "Blend", "Sweep1": "Sweep"}
+    steps = [(f.name, kinds.get(f.name, {"sketch": "ProfileFeature"}.get(f.TYPE)))
+             for f in lo.doc.features]
+    doc = check_saved_part(sw, rep, lo.doc.body, steps, rel=1e-2)
+    sw.close(doc)
+
+
 # ---- D1 / CON-13: helper reference geometry is named after its feature, hidden and listed;
 # BauyrCAD's own Plane1 keeps its name ---------------------------------------------------------
 def helper_part():
@@ -230,6 +293,13 @@ def test_blends_export_strictly_with_notes(sw, tmp_path):
 
 
 # ---- XC-03: a part without a solid (a layout / skeleton) exports natively -------------------
+def assert_same_curve(sw, doc, name, wire):
+    """The saved curve feature runs where BauyrCAD's does: every sampled point on it and the
+    same end points (so the same direction, hand and start angle for a helix)."""
+    dev, ends, length = swf.curve_deviation(sw, feature(sw, doc, name), wire)
+    assert max(dev, ends) < 1e-4 * length, (name, dev, ends)
+
+
 def test_bodyless_part_exports_natively(sw, tmp_path):
     p = Part("layout")
     s = p.sketch("front"); s.rect((0, 0), (40, 20))
@@ -240,7 +310,40 @@ def test_bodyless_part_exports_natively(sw, tmp_path):
     assert rep.volume == 0
     doc = check_saved_part(sw, rep, None, [("Sketch1", "ProfileFeature"), ("Plane1", "RefPlane"),
                                            ("Helix/Spiral1", "Helix")])
+    assert_same_curve(sw, doc, "Helix/Spiral1", p.doc.features[-1].result_wire)
     sw.close(doc)
+
+
+def helix_parts():
+    out = []
+    for axis, lh, start in (("-y", False, 0), ("y", True, 30), ("x", False, 30),
+                            ("-z", True, 30), ((1, 1, 0), False, 0)):
+        p = Part(f"helix {axis} {lh} {start}".replace("(", "").replace(")", "").replace(", ", "_"))
+        p.helix(center=(5, 3, 2), axis=axis, d=20, pitch=5, turns=2.5, left_hand=lh,
+                start_angle=start)
+        out.append(p)
+    q = Part("helix-on-face")                       # a sketch on a face whose normal is -Y
+    s = q.sketch("top"); s.rect((-20, -20), (20, 20)); q.extrude(s, 10)
+    s2 = q.sketch(on=q.face("-y")); s2.circle((3, 4), d=12)
+    q.helix(sketch=s2, pitch=4, turns=3, reverse=True, start_angle=45)
+    out.append(q)
+    return out
+
+
+def test_helices_run_where_bauyrcad_has_them(sw, tmp_path):
+    """A helix has no volume, so the volume check can't see it: the handler compares the curve
+    itself (direction about a -y axis, hand, start angle, a face-normal sketch reversed) and
+    the saved file is checked the same way."""
+    for p in helix_parts():
+        rep = export(sw, p, tmp_path)
+        steps = [(f.name, {"sketch": "ProfileFeature", "helix": "Helix",
+                           "extrude": None}.get(f.TYPE)) for f in p.doc.features]
+        doc = check_saved_part(sw, rep, p.doc.body, steps)
+        hx = p.doc.features[-1]
+        assert_same_curve(sw, doc, hx.name, hx.result_wire)
+        h = sw.T(feature(sw, doc, hx.name).GetDefinition(), "IHelixFeatureData")
+        assert (h.Pitch * 1e3, h.Revolution) == pytest.approx(hx.pitch_turns())
+        sw.close(doc)
 
 
 # ---- XC-06: rebuild health is read from SolidWorks ------------------------------------------

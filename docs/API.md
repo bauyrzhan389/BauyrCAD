@@ -36,7 +36,7 @@ part.render("bracket.png", study=st)      # model + fixtures + loads
 st.render("bracket_vm.png")               # von Mises contour (99th-percentile legend)
 st.render("bracket_disp.png", field="Displacement Magnitude")
 part.save("bracket.bcad")
-part.export("bracket.step")               # or .igs .stl .obj .glb .wrl .brep (by extension)
+part.export("bracket.step")               # or .sldprt .x_t .igs .stl .obj .glb .wrl .brep (by extension)
 ```
 
 ## Part
@@ -44,7 +44,7 @@ part.export("bracket.step")               # or .igs .stl .obj .glb .wrl .brep (b
 | Call | Meaning |
 |---|---|
 | `Part(name)` / `Part.open(path)` | new / existing part |
-| `part.sketch(plane="front")` | new sketch on a reference plane (`front/top/right`, or `xy/xz/yz`), or a `SketchPlane` |
+| `part.sketch(plane="front")` | new sketch on a reference plane (`front/top/right`, or `xy/xz/yz`: the sketch references that standard plane, `plane_spec={'type': 'std', ...}`), or a `SketchPlane` (fixed numbers) |
 | `part.sketch(on=face)` | sketch on a planar face (see *Sketch axes on faces*); it moves with the face when earlier features change |
 | `part.sketch("top", offset=40)` / `part.sketch(plane)` | sketch on a parallel plane (a reference plane is created) / on a `part.plane(...)` |
 | `part.extrude(sk, depth, midplane=False, reverse=False, contours=None)` | extruded boss |
@@ -66,11 +66,11 @@ part.export("bracket.step")               # or .igs .stl .obj .glb .wrl .brep (b
 | `part.rib(sk, thickness, normal=False, side="both", flip=False)` | rib from an open sketch line: fills to the body in the sketch plane (gusset), or `normal=True` (extruded normal to the sketch to the body) |
 | `part.wrap(sk, cylinder_face, depth=1, deboss=False)` | wrap the sketch's closed profiles (or text) onto a cylinder: emboss / deboss; sketch on a plane parallel to the axis (e.g. `part.sketch("front", offset=R)` for a cylinder about Y); arc lengths are kept |
 | `part.intersect(planes, exclude=[pts], fill=[pts])` / `part.regions(planes)` | split the body with planes / planar faces; remove the material regions containing `exclude` points, fill the closed voids containing `fill` points; `regions()` lists them (volume, inside point, material) |
-| `part.plane(base, offset=d)` / `plane(base, angle=a, axis=...)` / `plane(points=[a, b, c])` / `plane(normal_to=edge, at=p)` / `plane(mid=(f1, f2))` | reference plane (`base` = plane name, face or plane). Use in `part.sketch(plane)`, `hole(on=...)`, `mirror(plane=...)` |
-| `part.axis(through=(a, b) / face= / edge= / planes=(p1, p2) / point=, direction=)` | reference axis (patterns, angled planes) |
-| `part.point(xyz / arc_center=edge / face_center=face)` | reference point |
+| `part.plane(base, offset=d)` / `plane(base, angle=a, axis=...)` / `plane(points=[a, b, c])` / `plane(normal_to=edge, at=p)` / `plane(mid=(f1, f2))` | reference plane (`base` = plane name, face, plane, or a sketch: its standard / reference plane is referenced, like picking it in SolidWorks). Use in `part.sketch(plane)`, `hole(on=...)`, `mirror(plane=...)`. Exported as the native SolidWorks Reference Plane with the same references and constraints (an 'At angle' axis must lie in or parallel to the base plane) |
+| `part.axis(through=(a, b) / face= / edge= / planes=(p1, p2) / point=, direction=)` | reference axis (patterns, angled planes); exported as a native Reference Axis |
+| `part.point(xyz / arc_center=edge / face_center=face)` | reference point; exported as a native Reference Point (coordinates: 'On Point' of a hidden 3D-sketch point) |
 | `part.helix(center=, axis="y", d=, pitch=, turns=, height=, left_hand=False, taper=0)` / `helix(sketch=circle_sketch, ...)` | helix / spiral (give two of pitch, turns, height) - a sweep path for springs and threads |
-| `part.curve(points, closed=False, polyline=False)` | 3D curve through XYZ points (sweep path) |
+| `part.curve(points, closed=False, polyline=False)` | 3D curve through XYZ points (sweep path): the cubic spline in chord-length parameters with natural ends (closed: periodic), the curve SolidWorks' Curve Through XYZ Points makes from the same points; exported as Curve Through XYZ Points, a polyline as a 3D sketch of lines |
 | `part.edges_where(kind=, direction=, face=, r=, d=, length=, near=)` | model edges as dicts (`index, kind, length, mid, p0, p1, center, radius, direction`), usable in fillet / chamfer / patterns |
 | `part.import_file(path)` | STEP / IGES / BREP body |
 | `part.face(normal="+z", where="max")` | outermost planar face with that normal (`where="min"` for the innermost) |
@@ -81,7 +81,7 @@ part.export("bracket.step")               # or .igs .stl .obj .glb .wrl .brep (b
 
 Faces carry `index, kind` (plane/cylinder/cone/sphere/torus/bspline/other), `area, centroid`,
 `normal` (planar), `radius / diameter, axis, axis_point` (cylinders).
-| `part.export_solidworks(path, native=True, require_native=False)` | native `.SLDPRT` built by the SolidWorks on this PC: feature tree (sketches with every relation and dimension, driving and driven, each read back in SolidWorks, extrudes, cuts, revolves, fillets, chamfers, shells, drafts, Hole Wizard holes, patterns, mirrors, reference planes, lofts, sweeps, helices); returns a report: `native`, `features` (BauyrCAD steps rebuilt, in order), `warnings` (real losses: a step, relation, dimension, name or rebuild error that did not transfer; they block `require_native=True`), `notes` (approximations within tolerance, e.g. a spline or font-outline shape or a loft surface; never blocking), `helpers` (hidden helper geometry made for SolidWorks, named `<step> Plane/Axis/Points`), `steps` (a step that needed several SolidWorks features: `<name>`, `<name>-2`...), `volume`. Every step is checked by its change of volume and of first moment (where the material went), the saved part by a forced rebuild (What's Wrong) and its final volume and centre of mass; new parts use MMGS units. A part without a solid (sketches, planes, helices) exports too. A first imported solid preserves subsequent supported steps. Later imports, rib, wrap, intersect, boundary, body patterns, and sketch text sharing a sketch with other curves trigger reported solid-body fallback, or an error with `require_native=True` (found before SolidWorks starts: `solidworks.native_export_issues(part.doc)`) |
+| `part.export_solidworks(path, native=True, require_native=False)` | native `.SLDPRT` built by the SolidWorks on this PC: feature tree (sketches with every relation and dimension, driving and driven, each read back in SolidWorks, extrudes, cuts, revolves, fillets, chamfers, shells, drafts, Hole Wizard holes, patterns, mirrors, reference planes, axes, points and curves, lofts, sweeps, helices); returns a report: `native`, `features` (BauyrCAD steps rebuilt, in order), `warnings` (real losses: a step, relation, dimension, name or rebuild error that did not transfer; they block `require_native=True`), `notes` (approximations within tolerance, e.g. a spline or font-outline shape or a loft surface, or a plane whose normal SolidWorks keeps the other way; never blocking), `helpers` (hidden helper geometry made for SolidWorks, named `<step> Plane/Axis/Points`), `steps` (a step that needed several SolidWorks features: `<name>`, `<name>-2`...), `volume`. Every step is checked by its change of volume and of first moment (where the material went), the saved part by a forced rebuild (What's Wrong) and its final volume and centre of mass; new parts use MMGS units. A part without a solid (sketches, planes, helices) exports too. A first imported solid preserves subsequent supported steps. Later imports, rib, wrap, intersect, boundary, body patterns, and sketch text sharing a sketch with other curves trigger reported solid-body fallback, or an error with `require_native=True` (found before SolidWorks starts: `solidworks.native_export_issues(part.doc)`) |
 | `part.edge(near)` | index of the model edge nearest a point |
 
 Edges for fillet / chamfer can be given as points near them (`(x, y, z)` tuples), edge indices
@@ -92,7 +92,7 @@ and shells rebuild).
 | `part.vertex(near)` | model vertex nearest to a point, e.g. for point loads |
 | `part.volume()`, `part.bbox()`, `part.info()` | queries (`info` = features, faces with index/normal/centroid/area, studies) |
 | `part.render(png, view="iso", study=None)` | picture. Views: `iso iso2 iso_back iso_below front back top bottom right left` |
-| `part.save(path)`, `part.export(path, fmt=None)` | `.bcad`, or any export format |
+| `part.save(path)`, `part.export(path, fmt=None)` | `.bcad`, or any export format. `.SLDPRT` = a SolidWorks 2024 part written by BauyrCAD itself (no SolidWorks needed): its tree is one Imported feature holding the exact solid (several solids: one body of several lumps); for an editable feature tree use `export_solidworks` (needs SolidWorks). `.x_t` = Parasolid, written by BauyrCAD itself (no SolidWorks needed): SolidWorks, NX, Solid Edge and Onshape open it as an exact solid. Analytic and B-spline faces (extrudes, revolves, cuts, fillets, chamfers, shells, holes, patterns, splines, lofts, sweeps, helices, text), inner voids, and edges that lie up to 0.01 mm off their faces (written as Parasolid tolerant edges). Several solids are written as SolidWorks writes a multi-body part (an assembly of the bodies; SolidWorks opens it as an assembly). The part's name is written too. Assemblies: `asm.export("a.x_t")` or `asm.export("a.SLDASM")` |
 
 Failed features raise `ApiError` with the same message the GUI would show.
 
@@ -194,7 +194,7 @@ asm.render("hinge.png"); asm.save("hinge.bcasm"); asm.export("hinge.step")
 | Call | Meaning |
 |---|---|
 | `Assembly(name)` / `Assembly.open(path)` | new / existing `.bcasm` |
-| `asm.add(path_or_saved_Part, at=None, rotate=(axis, deg), fixed=None, name=None)` | insert a part (.bcad or STEP/IGES/BREP); returns a component |
+| `asm.add(path_or_saved_Part, at=None, rotate=(axis, deg), fixed=None, name=None, pose=None, color=None)` | insert a part (.bcad or STEP/IGES/BREP); returns a component. `pose` = a 4x4 placement matrix (mm) instead of `at` / `rotate`, e.g. a transform read from another CAD assembly; `color` = (r, g, b) 0..255 or 0..1 |
 | `comp.face(...)`, `comp.holes(d=)` | face selectors like `part.face`, in the **part's own coordinates** |
 | `comp.move(dx, dy, dz)`, `comp.rotate(axis, deg, about=None)`, `comp.fix(True/False)` | reposition / ground (then `asm.solve()`) |
 | `asm.mate(type, face_a, face_b, value=None, flip=False)` | types: `coincident parallel perpendicular distance angle concentric lock` (lock takes two components). Raises if the mate over-defines or can't be satisfied |
@@ -209,7 +209,9 @@ asm.render("hinge.png"); asm.save("hinge.bcasm"); asm.export("hinge.step")
 | `asm.clearance(a, b=None)` | minimum distance [mm] between two components, or from `a` to the nearest other one: `{a, b, distance, point_a, point_b, overlap}` (distance 0 = touching or overlapping; `overlap` [mm3] > 0 = interference) |
 | `asm.clearance_sweep(a, b=None, keyframes=[...], frames=12)` or `(..., poses=asm.motion(...))` | the smallest clearance over a motion study, with the frame where it happens and `distances` per frame (e.g. gripper vs. robot wrist over J5/J6 sweeps) |
 | `asm.interference(min_volume=1e-3, ignore=[(a, b)])` | overlapping components at the current pose `[{a, b, volume}]`; touching faces (a shaft in a same-size bore) are not interference. Call it at each keyframe of a motion |
-| `asm.render(png, view="iso")`, `asm.save(path)`, `asm.export(path, fmt=None)` | picture, `.bcasm` (paths stored relative to it), export. **STEP keeps the assembly structure** (one product per part file, placed instances, names and colours), so SolidWorks opens it as an assembly; IGES/STL/... get one compound |
+| `asm.render(png, view="iso")`, `asm.save(path)`, `asm.export(path, fmt=None)` | picture, `.bcasm` (paths stored relative to it), export. **STEP and Parasolid `.x_t` keep the assembly structure** (each part file once, placed instances, names and colours), so SolidWorks opens it as an assembly; `.x_t` is written by BauyrCAD itself (no SolidWorks needed) and keeps the colours exactly; IGES/STL/... get one compound |
+| `asm.export("a.SLDASM")` | a SolidWorks 2024 assembly written by BauyrCAD itself (no SolidWorks needed): each part once as `<part>.SLDPRT` next to it (exact solid as an Imported body, like `part.export(".SLDPRT")`), one component per BauyrCAD component named `<part>-1`, `<part>-2`... (a part used twice is shared), placed exactly and fixed / floating as here. No mates and no colours yet (use `asm.export_solidworks` with SolidWorks for mates). Up to 46 components (`swfile.max_components()`; larger assemblies: STEP or `.x_t`). Keep the folder together: SolidWorks finds the parts next to the assembly |
+| `bauyrcad.api.export_solidworks_tree("top.SLDASM", [(child, pose, fixed), ...])` | a SolidWorks 2024 assembly **of sub-assemblies**, written without SolidWorks: each child `Assembly` (or `.bcasm` path) is written as `<its name>.SLDASM` with its parts next to the top, and the top references it as a sub-assembly component (children may also be parts: a saved `Part`, `.bcad` or STEP path). `pose` = 4x4 matrix in mm (None = identity). Up to 46 components per level, so large machines go in as a tree. No mates and no colours (as above). Returns the files written |
 
 Mate conventions: face-to-face coincident and distance mates are **anti-aligned** by default
 (the faces oppose each other, touching or facing across the gap). `flip=True` gives aligned.
@@ -680,7 +682,12 @@ How the export works (for every feature family):
   alternatives. The first attempt whose change of volume and of first moment matches
   BauyrCAD's within a tolerance relative to the step's own volume change is kept
   (exact steps 1e-5, spline-based 1e-4, sweeps 1e-3, lofts/boundaries 1e-2; the
-  difference is a report note). `report.attempts` says which attempt was kept.
+  difference is a report note). The first moment is taken about the step's neighbourhood,
+  so the check does not depend on where the part sits; the only body-wide allowance is a
+  1e-8 measurement floor (SolidWorks measures at its Higher accuracy) plus any difference
+  an earlier step already left and OpenCASCADE's measured integration uncertainty on
+  B-spline faces (0 on analytic faces). Curve features with no volume (helices, curves through
+  points) are compared as curves instead. `report.attempts` says which attempt was kept.
 * Entities SolidWorks needs but BauyrCAD does not store as features (an axis along X, a
   plane for an explicit sketch plane, coordinate points) become hidden helpers named
   after the step (`Sketch3 Plane`, `LPattern1 Axis` + `LPattern1 Axis Sketch`) and are
@@ -690,10 +697,12 @@ How the export works (for every feature family):
 * Sketches go on what they reference in BauyrCAD: a standard plane, the reference plane
   feature itself, or the model face (found through a point inside BauyrCAD's face, so a
   face away from the origin or lying on another plane still parents the sketch to its
-  feature). An explicit `SketchPlane` uses a standard / earlier plane in the same place,
-  else a hidden `<sketch> Plane`. SolidWorks' sketch axes are turned onto BauyrCAD's when
-  Horizontal / Vertical relations, h/v dimensions or text depend on them, and references
-  to the origin of an explicit plane whose origin is not the model origin's projection go
+  feature). `part.sketch("front")` references the Front Plane itself (as the GUI does),
+  never a reference plane that happens to lie on it. An explicit `SketchPlane` uses a
+  standard plane or an earlier helper plane in the same place, else a hidden
+  `<sketch> Plane` (never a transferred reference plane, which may follow model faces).
+  SolidWorks' sketch axes are turned onto BauyrCAD's when Horizontal / Vertical relations,
+  h/v dimensions or text depend on them, and references to the origin of an explicit plane whose origin is not the model origin's projection go
   to a hidden helper point `<sketch> Points`. Lines, arcs, circles, splines (through
   BauyrCAD's own points: editable spline points), Point entities and construction flags
   arrive as the same SolidWorks entities, shared points as one SolidWorks point, checked
@@ -723,8 +732,9 @@ See [native export coverage](SOLIDWORKS_EXPORT_COVERAGE.md).
 
 ```python
 from bauyrcad.core import sldprt
-rep = part.export_solidworks("out/plate.SLDPRT")
-sldprt.tree_mismatches(rep["path"], rep["features"])     # [] = every step is native, in order
+rep = part.export_solidworks("out/plate.SLDPRT", require_native=True)
+steps = [f.name for f in part.doc.features]              # what BauyrCAD has, not rep["features"]
+sldprt.tree_mismatches(rep["path"], steps)               # [] = every step is native, in order
 for f in sldprt.feature_tree(rep["path"]):               # FeatureManager tree of the file
     print(f.name, f.type_name, f.suppressed, f.dims)     # 'Boss-Extrude1' 'Extrusion' False {'D1': '20'}
 sldprt.mates("out/hinge.SLDASM")                         # name, type, components, alignment, values
@@ -732,4 +742,114 @@ sldprt.mates("out/hinge.SLDASM")                         # name, type, component
 
 `tree_mismatches` accepts `(name, GetTypeName2)` or `(name, type, suppressed)` items and
 reports missing or reordered steps, wrong types, a step name that belongs to a sketch
-inside another feature (Hole Wizard's), and any body without history (`BaseBody`).
+inside another feature (Hole Wizard's), and any body without history (`BaseBody`). Build the
+expected list from the document's own steps: `rep["features"]` lists only what the
+exporter made, so a step a non-strict export left out (with a warning) would not be
+checked. `SwFeature.unlinked` > 0 means an absorbed sketch could not be identified, so
+`parent` / `children` are incomplete for that feature.
+
+Origin references in supported standard/reference-plane sketches retain native external
+origin links, including shared profiles. Clockwise arcs keep their orientation and driving
+radius dimensions. Origin projection on a model-face sketch is not yet supported; strict
+export reports the reason and leaves an existing destination untouched. The command-line
+exporter returns status 2 for expected unsupported-export errors.
+
+### Experimental native feature archives (SolidWorks 2024, no COM)
+
+The low-level `bauyrcad.core.swtree` API edits a supported existing feature archive. It is
+groundwork for M4's automatic feature writer; `Part.export_solidworks` still uses COM.
+
+```python
+from bauyrcad.core import swtree
+container, arc = swtree.load("rectangle.SLDPRT")
+feature = next(f for f in arc.features if swtree.name(f) == "Sketch1")
+swtree.add_dimension(arc, feature, "length", 0)     # D1, current length of line 0
+swtree.add_dimension(arc, feature, "length", 1)     # D2, current length of line 1
+swtree.save(container, arc, "dimensioned.SLDPRT")
+```
+
+`add_dimension` supports `"length"` (index in the sketch's line list) and radial dimensions
+(index in the arc list): `"diameter"` for full circles, `"radius"` for circles or arcs. Indices are zero-based. Sizes come from current
+geometry; they become driving dimensions editable in SolidWorks. A duplicate on the same
+entity is refused. It returns the allocated name (`D1`, `D2`, ... within that sketch).
+
+`set_profile(arc, feature, loops, hv=True, dims=())` replaces the profile and removes old
+dimensions. For example, `dims=[("length", 0), ("diameter", 0)]` dimensions the first line
+and first circle in a profile with a hole. Dimensions use bundled SolidWorks-saved style
+templates; annotation positions are calculated automatically from the profile bounds.
+Lengths use outward perpendicular offsets; circle diameters use outward diagonal leaders.
+Nearby labels are spaced apart, and the layout is deterministic. This is a geometric layout
+heuristic, not full font-aware collision avoidance. `swtree.place_dimensions(feature)`
+recalculates existing annotations. Sketch angular dimensions and distances
+between arbitrary entities are not supported.
+
+### Offline SolidWorks feature writer (M4 + M5 families, SolidWorks 2024)
+
+The writer also supports revolve pairs on standard planes,
+with a construction centerline in the profile sketch, angles up to 360 degrees, reverse
+and mid-plane modes, bosses and cuts. Generated files pass SolidWorks rebuild, geometry,
+angle-edit and save/reopen gates. Ordinary profile-line,
+external-sketch, model-edge and reference-axis revolve axes are not supported by this writer.
+
+Face-attached sketches: a second extrusion may use a planar side or end-cap face of
+one polygonal base extrusion (Front/Top/Right, no holes). The base may be blind, reversed
+or mid-plane. The added feature may be a forward blind or mid-plane boss, or a blind /
+through-all / both-directions cut. The exported sketch keeps its native face reference
+and follows parent edits. Longer face-based histories, reverse blind face bosses,
+revolves on faces and custom reference planes remain unsupported.
+
+Reference planes: `part.plane("top", offset=17)`, zero-offset/coincident planes and
+`part.plane(mid=(plane1, plane2))` are supported when their parents are standard planes or
+earlier supported reference planes. Dependencies, offset dimensions and attached sketch
+frames remain editable. Chained reference planes work in extrusion/revolve histories,
+including unused planes. Angled, three-point, normal-to-axis, flipped and face-parented
+planes, mixed face/reference-plane histories, and finishing features in reference-plane
+histories are not yet supported.
+
+Finishing features: a single constant-radius `fillet` or equal-distance `chamfer` after one
+forward blind extrusion of a polygon without holes. Front/Top/Right, multiple selected
+edges, face selections (all their edges), renamed features and driving sketch lengths are
+supported. The radius/distance and preceding extrusion depth remain editable in SolidWorks.
+Variable-radius fillets, asymmetric chamfers, curved profiles, holes, reverse/mid-plane
+extrusions and finishing features in longer histories explicitly fall back for now.
+
+```python
+report = part.export_solidworks_offline("part.SLDPRT", require_native=True)
+# Or: part.export("part.SLDPRT", features=True)
+# Core: swfile.write_part(doc, path, features=True)
+```
+
+`native`, `features`, `warnings`, and `path` describe the output. Unsupported parts fall
+back as a whole to an Imported body; `require_native=True` raises before overwriting the
+destination. Feature names must be unique without regard to case and cannot collide
+with built-in SolidWorks names such as `Front Plane` or `Origin`.
+Supported: connected single-solid parts built with sketch/extrude
+or sketch/revolve features on Front/Top/Right, including shared profiles and sketches
+created before other consumed sketches; blind/reverse/mid-plane bosses; blind/reverse/mid-plane/through-all/
+through-all-both cuts, including automatically reversed cuts. Profiles may
+contain lines, counter-clockwise arcs and circles, one outer loop with holes, H/V relations,
+line lengths, circle diameters and circle/arc radii. Construction lines/circles and explicit
+sketch points are preserved. Supported relations: line parallel/perpendicular, arc-line
+tangency, equal lines/arcs/circles, concentric circles, point-line midpoint, point-on-circle
+and point-on-line coincidence, horizontal/vertical point pairs, collinear lines, point
+symmetry, fixed geometry and shared profile endpoints. Fixed lines/arcs also receive
+endpoint Fix relations; stored point flags become native Fix relations. This covers straight slots, centered and
+three-point rectangles, parallelograms and regular polygons. Source H/V constraints are
+preserved exactly; geometry alone does not invent constraints. Standalone sketches, explicit
+external-origin anchors, equations/parameter bindings, other unrepresented constraints,
+unsupported face/reference planes and selected contours fall back with a reason. Default
+`part.export("part.SLDPRT")` retains the existing solid-body writer.
+
+CLI: `python -m bauyrcad export part.bcad part.SLDPRT --features --require-native` prints the
+report as JSON. GUI: choose **File > Export editable SolidWorks part (offline)**, or
+**SolidWorks 2024 editable feature tree (no SolidWorks needed)** in Export/Save As.
+These GUI choices require a native tree: unsupported models show an error and do not
+replace the destination with an Imported body. For geometry-only output, choose the
+separate **exact solid** format. **Export using installed SolidWorks** uses COM.
+The scripting API retains its optional reported whole-part fallback.
+
+The writer does not run SolidWorks. Its bundled templates were made once in SolidWorks
+2024; the generated files are tested by opening, rebuilding, comparing volume and bounds,
+editing a dimension, and saving/reopening in a private SolidWorks session. Unsupported
+features such as shells, patterns, standalone sketches, arbitrary constraints and
+nonstandard planes remain whole-part solid fallbacks rather than partial native trees.

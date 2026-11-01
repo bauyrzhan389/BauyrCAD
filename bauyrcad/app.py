@@ -134,6 +134,14 @@ def selftest(log_path: str | None = None) -> int:
         asm.export(os.path.join(tmp, "a.step"))
         st_asm = exchange.read_step_structure(os.path.join(tmp, "a.step"))
         ok_step_asm = len(st_asm["instances"]) == 2 and st_asm["parts"] == ["plate", "shaft"]
+        # SolidWorks 2024 files written without SolidWorks (needs the bundled seed files)
+        from .core import sldprt, swfile
+        sw_tree = [f.name for f in sldprt.feature_tree(os.path.join(tmp, "part_sldprt.sldprt"))]
+        asm.export(os.path.join(tmp, "sw", "a.SLDASM"))
+        sw_comps = swfile.assembly_components(os.path.join(tmp, "sw", "a.SLDASM"))
+        ok_swfiles = sw_tree == ["Imported1"] and len(sw_comps) == 2
+        lines.append(f"SolidWorks .SLDPRT/.SLDASM without SolidWorks {'ok' if ok_swfiles else 'FAILED'}")
+        ok_step_asm = ok_step_asm and ok_swfiles
         from .api import Drawing
         drw = Drawing(os.path.join(tmp, "plate.bcad"))
         drw.auto_dimension("Front")
@@ -159,6 +167,62 @@ def selftest(log_path: str | None = None) -> int:
         lines.append(f"step assembly {'ok' if ok_step_asm else 'FAILED'}, drawing: "
                      f"{', '.join(dwrote)}, {ndim} dimensions {'ok' if ok_drw else 'FAILED'}")
         ok_exports = ok_exports and ok_step_asm and ok_drw
+        # Exercise the actual bundled native writer, including annotation and finishing
+        # donors. This must work without a SolidWorks connection in the frozen app.
+        from .core import sldprt
+        offline_part = Part("offline-fillet")
+        offline_sk = offline_part.sketch('front')
+        offline_lines = offline_sk.rect((0, 0), (40, 20))
+        offline_sk.dim(offline_lines[0], 40)
+        offline_part.extrude(offline_sk, 10)
+        offline_part.fillet([(0, 0, 5)], r=2)
+        face_part = Part('offline-face-sketch')
+        face_sk = face_part.sketch('front')
+        face_sk.rect((0, 0), (40, 20))
+        face_part.extrude(face_sk, 10)
+        face_sk = face_part.sketch(on=face_part.face('+x'))
+        face_sk.rect((-7, 8), (-3, 12))
+        face_part.extrude(face_sk, 5)
+        face_cut = Part('offline-cap-cut')
+        face_sk = face_cut.sketch('front')
+        face_sk.rect((0, 0), (40, 20))
+        face_cut.extrude(face_sk, 10, midplane=True)
+        face_sk = face_cut.sketch(on=face_cut.face('+z'))
+        face_sk.rect((8, 6), (12, 10))
+        face_cut.cut(face_sk, through=True)
+        slot_part = Part('offline-slot')
+        slot_sk = slot_part.sketch('front')
+        slot_entities = slot_sk.slot((3, 5), (37, 16), 9)
+        slot_sk.dim(slot_entities[0])
+        slot_sk.dim(slot_entities[1], 4.5)
+        slot_part.extrude(slot_sk, 11)
+        polygon_part = Part('offline-polygon')
+        polygon_sk = polygon_part.sketch('top')
+        polygon_sk.polygon((12, 17), 20, sides=5, angle=17)
+        polygon_sk.dim(next(e for e in polygon_sk.sk.entities.values() if e.kind == 'circle'))
+        polygon_part.extrude(polygon_sk, 11)
+        plane_part = Part('offline-reference-planes')
+        offset_plane = plane_part.plane('right', offset=-18)
+        middle_plane = plane_part.plane(mid=('right', offset_plane))
+        coincident_plane = plane_part.plane(middle_plane, offset=0)
+        plane_sk = plane_part.sketch(coincident_plane)
+        plane_sk.rect((3, 5), (37, 23))
+        plane_part.extrude(plane_sk, 11)
+        shared_part = Part('offline-shared-fixed-profile')
+        shared_sk = shared_part.sketch('top')
+        shared_lines = shared_sk.rect((3, 5), (43, 27))
+        shared_sk.relate('fix', shared_lines[0])
+        shared_sk.dim(shared_lines[1])
+        shared_part.extrude(shared_sk, 11)
+        shared_part.extrude(shared_sk, 7, reverse=True)
+        for offline_index, offline_model in enumerate((offline_part, shaft, face_part, face_cut,
+                                                       slot_part, polygon_part, plane_part, shared_part)):
+            offline_path = os.path.join(tmp, f'offline_{offline_index}.SLDPRT')
+            offline_report = offline_model.export_solidworks_offline(offline_path, require_native=True)
+            assert offline_report['native']
+            assert not sldprt.tree_mismatches(offline_path,
+                [f.name for f in offline_model.doc.features], exact=True)
+        lines.append('offline editable SolidWorks export + bundled sketch/fillet/revolve/face/reference-plane donors ok')
         # SolidWorks export: bridge present; a real export only when asked (it runs SolidWorks)
         from . import solidworks
         sw_line = "solidworks bridge ok, SolidWorks " + ("found" if solidworks.available() else "not installed")

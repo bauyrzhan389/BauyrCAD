@@ -1038,6 +1038,8 @@ class SwFeature:
     kw_type: str | None = None       # KeyWords display type ('Boss-Extrude', 'Fillet'...)
     dims: dict = field(default_factory=dict)       # dimension name -> shown value
     resolved_by: str = "unresolved"  # mfc-new | keywords | mfc-count | unresolved
+    unlinked: int = 0                # absorbed children the file declares but the decoder
+                                     # could not identify (so `children` is incomplete)
 
     @property
     def dumb_solid(self) -> bool:
@@ -1051,85 +1053,188 @@ def feature_configurations(src) -> list:
                   if (m := re.fullmatch(r"Contents/Config-(\d+)-ResolvedFeatures", k)))
 
 
-def _resolve_classes(recs, kw, b, classes) -> dict:
-    """{class index k: (class name, how)} for the class references of the records. The
-    candidates for k are the classes whose header comes before k is first used (any class
-    when k is below the stream's start count: its header is in Contents/Config-N); the
-    records using k vote with their KeyWords types. Falls back to counting the MFC map."""
-    first_new = {}
+def _class_headers(classes) -> dict:
+    """{class name: offset of its header in this stream} (the first, if a name repeats)."""
+    out = {}
     for pos in sorted(classes):
-        first_new.setdefault(classes[pos][0], pos)
+        out.setdefault(classes[pos][0], pos)
+    return out
+
+
+def _resolve_classes(recs, kw, b, classes, sim=None) -> dict:
+    """{class index k: (class name, how)} for the class references of the records.
+
+    An archive gives each class ONE index, numbered in the order the class headers come.
+    So a reference k at or above the stream's start count names a class whose header is in
+    this stream before k is first used, and a smaller k a class whose header is not here
+    (it is in Contents/Config-N). The candidates for k are the classes its records' KeyWords
+    types allow (a set: how often a type goes with a class in other files only breaks
+    ties). This stream's indices are then matched one-to-one to the headers in stream
+    order (monotone), by how close each header's simulated count, corrected at the indices
+    that have a single candidate, comes to k; a header whose count is exactly k but whose
+    class the KeyWords type does not allow is taken only when nothing else keeps the order
+    (KeyWords ids of a part with an inserted part can name another part's feature). A
+    reference without a usable KeyWords type takes the header whose simulated count is
+    exactly k ('mfc-count'), else stays unresolved."""
+    headers = _class_headers(classes)
     groups = defaultdict(list)
     for r in recs:
         if r.class_ref is not None:
             groups[r.class_ref].append(r)
     start = _u32(b, 0) if len(b) >= 4 else 0
-    out, sim, voted = {}, None, {}
+    _, sim_obj = sim or _mfc_indices(b, classes)
+    sim_k = {c: sim_obj[p] - 1 for c, p in headers.items() if p in sim_obj}
+
+    out, cands, votes_of, unvoted = {}, {}, {}, []
     for k, rs in groups.items():
         first = min(x.pos for x in rs)
-        cands = {c for c, p in first_new.items() if p < first}
         votes = Counter()
         for x in rs:
             item = kw.get(x.id)
             if item is not None:
                 for c, n in _kw_classes(item.tag, item.type).items():
-                    if c in cands or k < start:
-                        votes[c] += n
-        if votes:
-            voted[k] = votes
+                    votes[c] += n
+        if k >= start:
+            here = [c for c in votes if c in sim_k and headers[c] < first]
+        else:
+            here = [c for c in votes if c not in headers] or list(votes)
+        if not here:
+            unvoted.append((k, first))
             continue
-        if sim is None:
-            sim = _mfc_indices(b, classes)[0]
-        c = sim.get(k)
-        out[k] = (c, "mfc-count") if c in cands else (None, "unresolved")
-    # An archive gives each class ONE index, so two indices can't both be (say) a 2D sketch:
-    # the strongest vote keeps a class, a weaker index takes its next-best class (a 3D
-    # sketch's KeyWords tag is the same 'Sketch' as a 2D sketch's).
-    taken = {c for c, how in out.values() if c is not None and how == "mfc-count"}
-    for k, votes in sorted(voted.items(), key=lambda kv: -kv[1].most_common(1)[0][1]):
-        best = next((c for c, _ in votes.most_common() if c not in taken),
-                    votes.most_common(1)[0][0])
-        taken.add(best)
-        out[k] = (best, "keywords")
-    # The archive numbers classes in the order their headers come: indices from this stream
-    # (k >= start) whose classes' headers are here must grow with those headers' offsets.
-    # Equal votes (a 3D sketch after a 2D one, both tagged 'Sketch') are put in that order.
-    ks = sorted(k for k in voted if k >= start and out[k][0] in first_new)
-    ordered = sorted((out[k][0] for k in ks), key=lambda c: first_new[c])
-    if all(c in voted[k] for k, c in zip(ks, ordered)):
-        for k, c in zip(ks, ordered):
-            out[k] = (c, "keywords")
+        votes_of[k], cands[k] = votes, here
+
+    # the simulated count drifts (data bytes that look like tags, objects it misses):
+    # correct it at the indices whose class is certain
+    anchors = sorted((headers[c[0]], k - sim_k[c[0]]) for k, c in cands.items()
+                     if k >= start and len(c) == 1)
+
+    def est(c):
+        p = headers[c]
+        shift = next((d for q, d in reversed(anchors) if q <= p), anchors[0][1] if anchors else 0)
+        return sim_k[c] + shift
+
+    for k, first in unvoted:
+        c = next((c for c in sim_k if headers[c] < first and sim_k[c] == k), None)
+        out[k] = (c, "mfc-count") if c is not None else (None, "unresolved")
+    taken = {c for c, _ in out.values() if c is not None}
+
+    ks = sorted(k for k in cands if k >= start)
+    first_use = {k: min(x.pos for x in groups[k]) for k in ks}
+    opts = []
+    for k in ks:
+        voted = [c for c in cands[k] if c not in taken] or cands[k]
+        counted = [c for c in sim_k if c not in voted and headers[c] < first_use[k]
+                   and k in (sim_k[c], est(c))]
+        opts.append(sorted(voted + counted, key=headers.get))
+    # states: the class of the last matched header -> (total cost, matches so far); an index
+    # may stay unmatched (at a large cost) when no header keeps the order, e.g. a stream that
+    # holds a second archive (an inserted part)
+    states = {None: (0.0, ())}
+    for i, k in enumerate(ks):
+        nxt = {}
+        for last, (total, path) in states.items():
+            for c in opts[i]:
+                if last is not None and headers[c] <= headers[last]:
+                    continue
+                cost = total + abs(est(c) - k) - 1e-6 * votes_of[k][c] + (0 if c in votes_of[k] else 1e9)
+                if c not in nxt or cost < nxt[c][0]:
+                    nxt[c] = (cost, path + ((k, c),))
+            if last not in nxt or total + 1e12 < nxt[last][0]:
+                nxt[last] = (total + 1e12, path)
+        states = nxt
+    matched = dict(min(states.values(), key=lambda v: v[0])[1]) if states else {}
+    for k, c in matched.items():
+        out[k] = (c, "keywords" if c in votes_of[k] else "mfc-count")
+    taken |= set(matched.values())
+    for k in sorted((k for k in ks if k not in matched), key=lambda k: -votes_of[k].most_common(1)[0][1]):
+        order = sorted(cands[k], key=lambda c: (c in taken, -votes_of[k][c]))
+        taken.add(order[0])
+        out[k] = (order[0], "keywords")
+    taken |= {c for c, _ in out.values() if c is not None}
+    # indices of Contents/Config-N: strongest vote first, one class per index
+    for k in sorted((k for k in cands if k < start), key=lambda k: -votes_of[k].most_common(1)[0][1]):
+        order = sorted(cands[k], key=lambda c: -votes_of[k][c])
+        c = next((c for c in order if c not in taken), order[0])
+        taken.add(c)
+        out[k] = (c, "keywords")
     return out
 
 
-def _object_indices(recs, kmap, b, classes) -> dict:
-    """{object index: record number} for resolving absorbed children stored as back
-    references. A record that introduces its class has object index k + 1, where k is the
-    class reference later records resolve to that class (exact). Other records take the
-    simulated count, shifted by the offset seen at the nearest earlier exact anchor."""
+def _object_anchors(kmap, b, classes) -> list:
+    """[(offset, object index)] where the MFC object count is known exactly: the header of
+    a class whose index k is resolved (the object it introduces is k + 1), increasing in
+    both offset and index."""
+    headers = _class_headers(classes)
     by_class = defaultdict(set)
     for k, (c, _how) in kmap.items():
         if c is not None:
             by_class[c].add(k)
-    exact = {c: next(iter(ks)) for c, ks in by_class.items() if len(ks) == 1}
-    _, sim = _mfc_indices(b, classes)
-    anchors, out = [], {}
-    for n, r in enumerate(recs):
-        if r.new_class in exact:
-            out[exact[r.new_class] + 1] = n
-            if r.start in sim:
-                anchors.append((r.start, exact[r.new_class] + 1 - sim[r.start]))
-    anchors.sort()
-    for n, r in enumerate(recs):
-        if r.new_class in exact or r.start not in sim:
-            continue
-        shift = 0
-        for pos, d in anchors:
-            if pos > r.start:
-                break
-            shift = d
-        out.setdefault(sim[r.start] + shift, n)
+    start = _u32(b, 0) if len(b) >= 4 else 0
+    pts = sorted((headers[c], next(iter(ks)) + 1) for c, ks in by_class.items()
+                 if len(ks) == 1 and c in headers and next(iter(ks)) >= start)
+    out = []
+    for p, o in pts:                       # drop anchors that break the order
+        if not out or o > out[-1][1]:
+            out.append((p, o))
     return out
+
+
+def _link_back_refs(recs, tails, kmap, b, classes, cls_of, parent, kids, link, sim=None):
+    """Link absorbed children stored earlier (an extrude's profile sketch, a loft's
+    profiles, a sweep's path) to their owner. Each is a back reference to an MFC object
+    index. The exact counts at :func:`_object_anchors` bound where that object can be in
+    the stream; a reference is linked when one free sketch lies within its bounds (in the
+    order of the owner's other references), or when the drift-corrected simulated count of
+    one of several is less than half as far from it as the next one's. Checked against
+    KeyWords' DissectableChildren on 924 SolidWorks 2024 sample parts: 1436 links agree,
+    none differs, 189 are left to KeyWords (counted in SwFeature.unlinked when it lacks
+    them too)."""
+    anchors = _object_anchors(kmap, b, classes)
+    _, sim = sim or _mfc_indices(b, classes)
+
+    def bounds(o, owner):
+        lo = max((p for p, a in anchors if a < o), default=-1)
+        hi = min((p for p, a in anchors if a > o), default=len(b))
+        at = next((p for p, a in anchors if a == o), None)
+        return lo, min(hi, recs[owner].start), at
+
+    def estimate(j):
+        s = recs[j].start
+        if s not in sim:
+            return None
+        shift = next((a - sim[p] for p, a in reversed(anchors) if p <= s and p in sim), 0)
+        return sim[s] + shift
+
+    for n, t in enumerate(tails):
+        if not t.refs or len(kids[n]) >= t.n_children:
+            continue
+        pool = [j for j in range(n) if cls_of[j] in _SKETCH_CLASSES
+                and (j not in parent or parent[j] == n)]
+        refs = sorted(set(t.refs))
+        options = {}
+        for o in refs:
+            lo, hi, at = bounds(o, n)
+            options[o] = [j for j in pool if (recs[j].start == at if at is not None
+                                              else lo < recs[j].start < hi)]
+        done = {}
+        progress = True
+        while progress and len(kids[n]) < t.n_children:
+            progress = False
+            for o in refs:
+                if o in done:
+                    continue
+                below = max((done[x] for x in done if x < o), default=-1)
+                above = min((done[x] for x in done if x > o), default=n)
+                opts = [j for j in options[o] if below < j < above and j not in done.values()]
+                if len(opts) > 1:
+                    gap = sorted((abs(e - o), j) for j in opts if (e := estimate(j)) is not None)
+                    if len(gap) > 1 and 2 * gap[0][0] < gap[1][0]:
+                        opts = [gap[0][1]]
+                if len(opts) == 1:
+                    done[o] = opts[0]
+                    if parent.get(opts[0]) != n:
+                        link(opts[0], n)
+                    progress = True
 
 
 def feature_tree(src, config: int = 0, user_only: bool = True) -> list:
@@ -1148,7 +1253,8 @@ def feature_tree(src, config: int = 0, user_only: bool = True) -> list:
     kw = keywords(sections)
     classes = _new_classes(b)
     recs = [r for r in _records(b, classes) if r.id != _NO_ID]
-    kmap = _resolve_classes(recs, kw, b, classes)
+    sim = _mfc_indices(b, classes)
+    kmap = _resolve_classes(recs, kw, b, classes, sim)
     tails = [_tail(b, r) for r in recs]
     docs = {_last(d.get("id")): d for d in _config_docs(exchange_docs(sections), config)
             if isinstance(_last(d.get("id")), int)}
@@ -1181,24 +1287,27 @@ def feature_tree(src, config: int = 0, user_only: bool = True) -> list:
             if item.id in by_id and cid in by_id:
                 link(by_id[cid], by_id[item.id])
     cls_of = [r.new_class or kmap.get(r.class_ref, (None,))[0] for r in recs]
+    # Supported 2024 archives have an exact object map. Counting tags heuristically can
+    # misidentify repeated extrusion classes after newly written sketches/dimensions.
+    from . import mfc
+    try:
+        if f'Contents/Config-{config}' not in sections:
+            raise mfc.MfcError('Configuration stream absent')
+        arc = mfc.load_archive(sections, config)
+        exact = {f.values['name'].values['id']: f for f in arc.features}
+    except mfc.MfcError:
+        exact = {}
+    for n, r in enumerate(recs):
+        if r.id in exact:
+            cls_of[n] = exact[r.id].name
     if any(t.refs and len(kids[n]) < t.n_children for n, t in enumerate(tails)):
-        # Children stored earlier (an extrude's profile sketch) are back references to MFC
-        # object indices, which the simulated count only approximates. A link is made only
-        # when the anchored count lands exactly on the nearest earlier free sketch.
-        objects = _object_indices(recs, kmap, b, classes)
-        for n, t in enumerate(tails):
-            for o in t.refs:
-                c = objects.get(o)
-                if len(kids[n]) >= t.n_children or c is None or c >= n:
-                    continue
-                nearest = next((j for j in range(n - 1, -1, -1)
-                                if cls_of[j] in _SKETCH_CLASSES and j not in parent), None)
-                if c == nearest:
-                    link(c, n)
+        _link_back_refs(recs, tails, kmap, b, classes, cls_of, parent, kids, link, sim)
     origin = next((n for n, c in enumerate(cls_of) if c == "moOriginProfileFeature_c"), None)
     out = []
     for n, r in enumerate(recs):
         cls, how = (r.new_class, "mfc-new") if r.new_class else kmap.get(r.class_ref, (None, "unresolved"))
+        if r.id in exact:
+            cls, how = exact[r.id].name, 'mfc-exact'
         t, item, doc = tails[n], kw.get(r.id), docs.get(r.id)
         suppressed = t.suppressed if t.inline_at is None else None
         hidden = None
@@ -1213,7 +1322,7 @@ def feature_tree(src, config: int = 0, user_only: bool = True) -> list:
             recs[parent[n]].id if n in parent else None, [recs[c].id for c in kids[n]], hidden,
             n in inner, item.tag if item else None,
             item.type if item else None,
-            dict(item.dims) if item else {}, how))
+            dict(item.dims) if item else {}, how, max(0, t.n_children - len(kids[n]))))
     return [f for f in out if not f.system] if user_only else out
 
 

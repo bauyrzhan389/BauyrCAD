@@ -97,6 +97,8 @@ def main(argv=None) -> int:
     p.add_argument("file")
     p.add_argument("out")
     p.add_argument("--format")
+    p.add_argument("--features", action="store_true", help="offline SolidWorks feature tree, with reported solid fallback")
+    p.add_argument("--require-native", action="store_true", help="fail instead of falling back to an Imported solid")
     p = sub.add_parser("drawing", help="drawing sheet of a part/assembly -> .pdf .dxf .dwg .svg .png .bcdrw")
     p.add_argument("file", help=".bcad / .bcasm / STEP model, or a .bcdrw drawing")
     p.add_argument("out", nargs="+", help="output file(s)")
@@ -121,6 +123,8 @@ def main(argv=None) -> int:
     if a.cmd == "formats":
         from .core import exchange
         print(json.dumps({"export": [(f.key, f.label, f.extensions) for f in exchange.EXPORT_FORMATS],
+                          "assembly_export": [(f.key, f.label, f.extensions)
+                                              for f in exchange.ASSEMBLY_FORMATS],
                           "import": [(f.key, f.label, f.extensions) for f in exchange.IMPORT_FORMATS]},
                          indent=1))
         return 0
@@ -185,6 +189,11 @@ def main(argv=None) -> int:
             s["vtu"] = a.vtu
         print(json.dumps(s, indent=1))
     elif a.cmd == "export":
-        doc.export(a.out, a.format)
-        print(a.out)
+        from .core.swfile import SwFileError
+        try:
+            rep = doc.export(a.out, a.format, features=a.features, require_native=a.require_native)
+        except SwFileError as exc:
+            print(f"Could not export: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(rep, indent=1) if a.features else a.out)
     return 0

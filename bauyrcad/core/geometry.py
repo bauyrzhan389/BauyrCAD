@@ -605,6 +605,72 @@ def center_of_mass(shape) -> np.ndarray:
     return _xyz(props.CentreOfMass())
 
 
+def _split_at_knots(shape):
+    """The shape with every B-spline face and edge split at its interior knots (C3 breaks):
+    each piece is then one polynomial span, which the fixed Gauss integration measures
+    exactly. Whole multi-span B-spline faces (a sketch spline through 6 points, font
+    outlines...) are measured ~1e-4 off by it, and the adaptive integration can be several %
+    off on them. The original shape when the split fails, gives an invalid shape (a sweep
+    along a closed periodic spline does) or changes the volume by more than 1e-3."""
+    from OCP.GeomAbs import GeomAbs_C3
+    from OCP.ShapeUpgrade import ShapeUpgrade_ShapeDivideContinuity
+    try:
+        d = ShapeUpgrade_ShapeDivideContinuity(shape)
+        d.SetBoundaryCriterion(GeomAbs_C3)
+        d.SetPCurveCriterion(GeomAbs_C3)
+        d.SetSurfaceCriterion(GeomAbs_C3)
+        d.Perform()
+        out = d.Result()
+        if out is None or out.IsNull() or out.IsSame(shape):
+            return shape
+        if not BRepCheck_Analyzer(out).IsValid():
+            return shape
+        v0, v1 = volume(shape), volume(out)
+        return out if abs(v1 - v0) <= 1e-3 * abs(v0) + 1e-9 else shape
+    except Exception:  # noqa: BLE001 - measuring must never fail on this
+        return shape
+
+
+def accurate_mass_properties(shape) -> tuple[tuple[float, np.ndarray], tuple[float, np.ndarray]]:
+    """((volume, centre of mass) by Gauss integration, (volume, centre of mass) by adaptive
+    integration), both on the shape split at its B-spline knots (_split_at_knots): the first
+    is the accurate measure, and the difference between the two is how uncertain it still is
+    (0 on analytic faces). For checks against another kernel (the SolidWorks export)."""
+    sh = _split_at_knots(shape)
+    g = GProp_GProps()
+    BRepGProp.VolumeProperties_s(sh, g)
+    a = GProp_GProps()
+    BRepGProp.VolumeProperties_s(sh, a, 1e-9, True)
+    return (g.Mass(), _xyz(g.CentreOfMass())), (a.Mass(), _xyz(a.CentreOfMass()))
+
+
+def freeform_area(shape) -> float:
+    """Total area (mm²) of the faces that are not plane / cylinder / cone / sphere / torus
+    (B-spline, Bezier, extruded or revolved spline...): where two kernels' surfaces and
+    mass integrations may differ slightly."""
+    total = 0.0
+    if shape is None:
+        return total
+    analytic = (GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus)
+    for f in indexed_map(shape, TopAbs_FACE):
+        face = TopoDS.Face_s(f)
+        if BRepAdaptor_Surface(face).GetType() not in analytic:
+            props = GProp_GProps()
+            BRepGProp.SurfaceProperties_s(face, props)
+            total += abs(props.Mass())
+    return total
+
+
+def adaptive_mass_properties(shape, eps: float = 1e-9) -> tuple[float, np.ndarray]:
+    """(volume, centre of mass) by OpenCASCADE's adaptive integration to the relative error
+    ``eps``. The default (``volume``, ``center_of_mass``) uses a fixed Gauss order: exact on
+    analytic faces, a little off on B-spline faces. The two disagree only where the measuring
+    itself is uncertain, which is what the SolidWorks export's noise floor needs to know."""
+    props = GProp_GProps()
+    BRepGProp.VolumeProperties_s(shape, props, eps, True)
+    return props.Mass(), _xyz(props.CentreOfMass())
+
+
 def bounding_box(shape) -> tuple[np.ndarray, np.ndarray]:
     box = Bnd_Box()
     BRepBndLib.Add_s(shape, box, False)

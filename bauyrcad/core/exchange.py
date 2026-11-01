@@ -3,9 +3,8 @@
 Exact B-rep formats (keep the solid): STEP AP203/AP214/AP242, IGES, BREP.
 Mesh formats (triangles only, for 3D printing / rendering): STL, OBJ, glTF (.glb), VRML.
 
-Native SolidWorks files (.sldprt) are a closed, undocumented format that only SolidWorks
-itself (or licensed SDKs) can write; SolidWorks opens STEP AP214/AP242 and IGES as solid
-bodies, so those are the interchange formats to use.
+SolidWorks 2024 parts can be written offline as exact Imported solids, or experimentally
+as native sketch/extrude trees when a parametric document is supplied.
 """
 
 from __future__ import annotations
@@ -41,6 +40,9 @@ EXPORT_FORMATS = [
     Format("step242", "STEP AP242", (".step", ".stp"), True),
     Format("step203", "STEP AP203", (".step", ".stp"), True),
     Format("iges", "IGES", (".igs", ".iges"), True),
+    Format("xt", "Parasolid (SolidWorks, NX, Solid Edge)", (".x_t",), True),
+    Format("sldprt", "SolidWorks 2024 part, exact solid (no SolidWorks needed)", (".sldprt",), True),
+    Format("sldprt_features", "SolidWorks 2024 editable feature tree (no SolidWorks needed)", (".sldprt",), True),
     Format("brep", "OpenCASCADE BREP", (".brep",), True),
     Format("stl", "STL (binary)", (".stl",), False),
     Format("stl_ascii", "STL (ASCII)", (".stl",), False),
@@ -48,6 +50,12 @@ EXPORT_FORMATS = [
     Format("glb", "glTF binary", (".glb",), False),
     Format("wrl", "VRML", (".wrl",), False),
 ]
+# formats only an assembly writes (Assembly.export; a part's export has no .sldasm)
+SLDASM = Format("sldasm", "SolidWorks 2024 assembly + its parts, exact solids (no SolidWorks "
+                "needed)", (".sldasm",), True)
+ASSEMBLY_FORMATS = [SLDASM]
+ASSEMBLY_EXPORT_FORMATS = EXPORT_FORMATS[:5] + ASSEMBLY_FORMATS + EXPORT_FORMATS[5:]   # after .x_t
+ASSEMBLY_EXPORT_FORMATS = [f for f in ASSEMBLY_EXPORT_FORMATS if f.key != 'sldprt_features']
 IMPORT_FORMATS = [
     Format("step", "STEP", (".step", ".stp"), True),
     Format("iges", "IGES", (".igs", ".iges"), True),
@@ -93,11 +101,15 @@ def _mesh(shape, quality: float):
     return defl
 
 
-def export(shape, path, fmt: str | None = None, quality: float = 2e-4, name: str = "Part") -> None:
+def export(shape, path, fmt: str | None = None, quality: float = 2e-4, name: str = "Part", *,
+           document=None, features=False, require_native=False):
     """Write shape to path. fmt is a key of FORMATS (default: from the extension)."""
     if geometry.is_null(shape):
         raise ExchangeError("Nothing to export - the model is empty")
     f = FORMATS[fmt] if fmt else export_format_for(path)
+    features = features or f.key == 'sldprt_features'
+    if (features or require_native) and f.key not in ('sldprt', 'sldprt_features'):
+        raise ExchangeError('Feature-tree export requires .SLDPRT')
     path = str(path)
     if f.key in _STEP_SCHEMA:
         _write_step(shape, path, _STEP_SCHEMA[f.key], name)
@@ -109,6 +121,20 @@ def export(shape, path, fmt: str | None = None, quality: float = 2e-4, name: str
         w.ComputeModel()
         if not w.Write(path):
             raise ExchangeError(f"Could not write {path}")
+    elif f.key == "xt":                       # Parasolid text, written by BauyrCAD itself
+        from . import parasolid, xt_brep
+        try:
+            parasolid.write(xt_brep.bodies_from_shape(shape, name), path, name)
+        except parasolid.XtError as e:
+            raise ExchangeError(f"Parasolid (.x_t) export: {e}. STEP works for this part.") from e
+    elif f.key in ("sldprt", "sldprt_features"):  # written by BauyrCAD itself
+        from . import parasolid, swfile
+        try:
+            return swfile.write_part(shape, path, name, features=features, document=document,
+                                     require_native=require_native)
+        except parasolid.XtError as e:
+            raise ExchangeError(f"SolidWorks part (.SLDPRT) export: {e}. STEP works for this "
+                                "part.") from e
     elif f.key == "brep":
         geometry.write_brep(shape, path)
     elif f.key in ("stl", "stl_ascii"):
@@ -219,6 +245,31 @@ def read_text(key: str, text: str):
 
 
 # ---- STEP assemblies (product structure) ---------------------------------------------------------
+def write_xt_assembly(path, parts, instances, name="Assembly") -> None:
+    """A Parasolid .x_t of an assembly, written by BauyrCAD itself: parts = (name, shape,
+    rgb 0-255 | None), each written once (a part with several solids as one body of several
+    lumps), named, its faces coloured; instances = (part index, name, 4x4 pose in mm)."""
+    from . import parasolid, xt_brep
+    try:
+        bodies = []
+        for pname, shape, rgb in parts:
+            pieces = xt_brep.bodies_from_shape(shape, pname)
+            body = pieces[0] if len(pieces) == 1 else xt_brep.merge_lumps(pieces, pname)
+            body.name = pname
+            if rgb is not None:
+                for f in body.faces:
+                    f.color = tuple(float(c) / 255.0 for c in rgb[:3])
+            bodies.append(body)
+        insts = []
+        for k, iname, m in instances:
+            m = np.asarray(m, float)
+            insts.append(parasolid.Instance(k, rotation=m[:3, :3].tolist(),
+                                            translation=tuple(m[:3, 3] * 1e-3), name=iname))
+        parasolid.write(parasolid.Assembly(name, bodies, insts), path, name)
+    except parasolid.XtError as e:
+        raise ExchangeError(f"Parasolid (.x_t) export: {e}. STEP works for this assembly.") from e
+
+
 def write_step_assembly(path, parts, instances, name="Assembly", fmt="step214") -> None:
     """Write a STEP file with a real assembly structure, so SolidWorks & co. open it as an
     assembly of separate parts instead of one multi-body part.

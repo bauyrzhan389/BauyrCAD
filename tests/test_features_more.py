@@ -369,3 +369,30 @@ def test_repair_sketch_closes_gaps_and_removes_duplicates():
     assert out["gaps_closed"] >= 1 and out["duplicates"] == 1
     regions = sk.regions()
     assert len(regions) == 1 and len(sk.entities) == 4
+
+
+def test_curve_through_points_is_the_solidworks_spline():
+    """Curve Through XYZ Points = SolidWorks' curve from the same points: the cubic spline in
+    chord-length parameters with natural ends, periodic when closed (D2)."""
+    import numpy as np
+    from scipy.interpolate import CubicSpline
+    from bauyrcad.core import modeling
+
+    def dist_to_poly(p, poly):
+        a, b = poly[:-1], poly[1:]
+        ab = b - a
+        t = np.clip(np.sum((p - a) * ab, 1) / np.sum(ab * ab, 1), 0, 1)
+        return float(np.min(np.linalg.norm(a + t[:, None] * ab - p, axis=1)))
+
+    for pts, closed in (([(0, 0, 0), (20, 10, 5), (40, 0, 10), (60, -10, 0), (70, 0, -5)], False),
+                        ([(0, 0, 0), (35, 5, 0), (40, 30, 10), (5, 25, 0), (-3, 12, 4)], True)):
+        P = np.asarray(pts, float)
+        loop = np.vstack([P, P[:1]]) if closed else P
+        d = np.linalg.norm(np.diff(loop, axis=0), axis=1)
+        t = np.concatenate([[0], np.cumsum(d)]) / d.sum()
+        ref = CubicSpline(t, loop, axis=0, bc_type="periodic" if closed else "natural")(
+            np.linspace(0, 1, 20001))
+        wire = modeling.spline_wire(pts, closed)
+        assert modeling.is_closed_wire(wire) == closed
+        q = modeling.wire_points(wire, 60)
+        assert max(dist_to_poly(p, ref) for p in q) < 1e-4
