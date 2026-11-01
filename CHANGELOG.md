@@ -1,6 +1,8 @@
 # Changelog
 
 ## 0.4.0 (unreleased)
+- **Project introduction**: explain the personal engineering workflow behind BauyrCAD and
+  highlight experimental editable SolidWorks-format export as the main focus.
 - **Origin-anchored sketches offline**: explicit sketch-origin references remain constrained
   on standard and supported reference planes, including shared profiles and several sketches.
   Origin projection on model-face sketches remains unsupported and preserves the destination.

@@ -391,7 +391,8 @@ These are facts gathered for this note, not legal advice.
   model seeds must be established separately. Published educational terms contain use and
   generated-file restrictions; the installed licence stub points to the CLOSA/transaction
   documents rather than establishing which agreement applies. This review is unresolved.
-  Public release of the complete seed-based exporter is on hold pending that review.
+  The project owner authorized public publication on 2026-11-02. That decision is not a
+  legal opinion or a representation that the unresolved review has been completed.
 * **Siemens XT Format Reference:** it states that its audience is people writing translators
   to or from the transmit format, and IANA lists it as available on request. The copy found
   carries a copyright notice: use it as a reference and do **not** commit it to this repo.

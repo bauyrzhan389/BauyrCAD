@@ -1,14 +1,16 @@
 # BauyrCAD
 
-**Sketch it. Build it. See where it bends.**
+**CAD that fits the way I work.**
 
-BauyrCAD brings parametric modelling and finite element analysis into one desktop app.
-Draw a sketch, build your part, apply a load, and see the stresses—all in the same project.
-It also handles assemblies, manufacturing drawings, and Python scripts for repeatable designs.
+I started BauyrCAD because I wanted a CAD tool that felt convenient to me. After working in
+SolidWorks, I wanted to keep that familiar modelling workflow, bring in the command-line
+shortcuts I liked from AutoCAD, and build toward the structural analysis capabilities I valued
+in Nastran. BauyrCAD is my attempt to bring those ideas together in one desktop app, shaped
+by the parts I design and the engineering work I actually do.
 
-One of the most interesting things being built here is **editable SolidWorks export without
-running SolidWorks**. Supported parts export as native sketches and features with dimensions
-you can change in SolidWorks, preserving more of the work that went into the model.
+The main focus is **exporting editable SolidWorks files without running SolidWorks**.
+Supported parts export as native sketches and features with dimensions you can change in
+SolidWorks, so you can keep working with the model's design history after exporting it.
 Coverage is still growing: this is an experimental exporter, and some features and assembly
 mates aren't supported yet. The [coverage tracker](docs/SW_FEATURE_COVERAGE.md) shows exactly
 where it stands.

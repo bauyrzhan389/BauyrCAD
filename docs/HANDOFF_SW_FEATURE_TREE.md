@@ -17,11 +17,13 @@ The implementation is ready for a local commit and the requested private GitHub 
 Public README/description prepared with explicit experimental coverage limits. Use the
 existing private-information filtering rules; exclude personal projects and user-owned notes.
 
-Public release is separately on hold for the user's requested legal review: applicable licence
+The earlier legal review remains unresolved: applicable licence
 and model-seed redistribution rights remain unverified. Do not treat a green test suite or
 README disclaimer as resolving that review. Keep decompiler output and installed binaries
-out of the shareable snapshot. The existing GitHub repository is private; a filtered, validated
-snapshot may be uploaded there as requested, keeping visibility private. Private review notes:
+out of the shareable snapshot. On 2026-11-02 the user explicitly authorized making the existing
+GitHub repository public and requested a personal introduction emphasizing SolidWorks-format
+export, with AutoCAD and Nastran described as workflow influences. This supersedes the earlier
+publication hold; it does not establish a legal conclusion. Private review notes:
 projects/sw_features/PUBLICATION_REVIEW.md.
 
 ## REA native-code trial authorized (2026-11-01)
