@@ -6,8 +6,7 @@ This 24-second captioned animation uses a real BauyrCAD window capture and model
 exported by SolidWorks. It is an **API-driven demonstration, not a continuous mouse recording**.
 The native feature list and dimension values are read from SolidWorks; the side panel is an
 explanatory overlay, not a recreation of its user interface. Captures were made on 2026-11-02.
-The validation installation identified itself as **SolidWorks Student Edition — Academic Use
-Only**, as labelled in the animation. No licence or endorsement claim is made by this demo.
+No licence or endorsement claim is made by this demo.
 
 ## What it demonstrates
 
