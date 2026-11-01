@@ -1,6 +1,6 @@
 # Editable SolidWorks export demo
 
-![Build in BauyrCAD, export offline, edit and reopen in SolidWorks](media/solidworks-export-demo.gif)
+![Build in BauyrCAD, export offline, edit and reopen in SolidWorks](media/solidworks-export-demo-v2.gif)
 
 This 24-second captioned animation uses a real BauyrCAD window capture and model images
 exported by SolidWorks. It is an **API-driven demonstration, not a continuous mouse recording**.

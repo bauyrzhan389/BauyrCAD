@@ -16,5 +16,8 @@ jobs:
           cache: pip
       - name: Install
         run: pip install -e .[dev]
+      # Hosted Windows runners need software OpenGL for VTK screenshot tests.
+      - name: Set up headless rendering
+        uses: pyvista/setup-headless-display-action@9c1c7435d9635423c90d2c37489588c81673274a # v3
       - name: Test
         run: pytest -q

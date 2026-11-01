@@ -15,7 +15,7 @@ Coverage is still growing: this is an experimental exporter, and some features a
 mates aren't supported yet. The [coverage tracker](docs/SW_FEATURE_COVERAGE.md) shows exactly
 where it stands.
 
-![BauyrCAD offline export followed by a native dimension edit in SolidWorks](docs/media/solidworks-export-demo.gif)
+![BauyrCAD offline export followed by a native dimension edit in SolidWorks](docs/media/solidworks-export-demo-v2.gif)
 
 **24-second demo:** build in BauyrCAD, export with SolidWorks closed, then change the boss
 depth from 20 to 35 mm in SolidWorks and reopen the saved result. Captioned, API-driven
