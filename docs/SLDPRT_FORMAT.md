@@ -1273,3 +1273,25 @@ analytical volume and centroid checks, and save/reopen. A fixed lower-left sketc
 makes width edits deterministic. These files are written without COM or cached solids;
 SolidWorks only created the reference files and judged the results. Variable-thickness
 shells are not yet exposed in BauyrCAD's production modelling API or offline exporter.
+
+### Constant-thickness production subset (2026-11-02)
+
+`core/swshell.py` writes one polygonal forward extrusion followed by a constant-thickness
+Shell. Bundled `SH_open` and `SH_closed` archives supply records only; cached donor solids
+are dropped. Standard planes, profile geometry/relations/dimensions, extrusion depth,
+thickness, direction and names come from the BauyrCAD document. One removed end cap uses
+`moEndFaceSurfIdRep_c` cap 0/1 and a boundary reference for each generating sketch segment.
+Each copied boundary owns a separate `moFR_c`; sharing those objects produced a file that
+rebuilt initially but crashed after SolidWorks saved and reopened it. The external owner
+remains shared. Both initial and edited save/reopen are therefore mandatory gates.
+
+The non-angle `moFeatureDimHandle_c.geometry` block consists of 72 bytes, a u16 vector
+flag, optional 48 vector bytes and a trailing u16. This decodes both the previous compact
+radius form and Shell dimensions without changing the angle layout. The final Shell field
+is a nullable object, not an unconditionally zero u16. Both bundled references round-trip
+exactly. Variable-thickness lists are decoded but not populated by the production writer.
+
+Planar BauyrCAD shells now prefer intersection joins so outward corners match SolidWorks;
+previous arc joins rounded them and failed the independent volume gate. Curved-body shell
+modelling retains its existing arc-first behavior. The native subset excludes curved or
+holed profiles, side openings, multiple removed faces and longer histories.

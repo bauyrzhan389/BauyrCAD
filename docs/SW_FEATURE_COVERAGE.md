@@ -14,6 +14,13 @@ the production writer never starts it. Targeted static decompilation is authoriz
 
 ## Part feature families
 
+Compatibility/Shell milestone (2026-11-02): **1328 passed, no skips (41:35)** with private
+SolidWorks sessions isolated per test family. The GUI and scripting API check complete
+offline-writer compatibility on a private document before export. Constant-thickness
+Shell now has a production subset below; other pending families remain explicit blockers.
+Windows app/self-test, frozen/source Shell equality, ZIP integrity and executable identity
+passed. The original Downloads/asdfasdf model also exports from the rebuilt executable.
+
 Origin/clockwise/CLI milestone (completed 2026-11-02): **1286 tests passed, no skips (42:10)**.
 Windows app self-test passed; frozen origin/clockwise archives match source exports.
 Expected export errors return exit 2 and preserve output; ZIP integrity verified.
@@ -35,7 +42,7 @@ the actual registry so a newly added feature cannot silently disappear from the 
 | `import_step` | Solid-only | STEP/IGES/BREP are legitimately Imported features; preserve that feature and all following native operations, multiple imports and body identities. |
 | `fillet` | Partial | Constant radius, selected edges/faces, single forward polygonal extrusion. Need variable radius, curved/holed/reversed bases, later histories, tangent-chain identity. |
 | `chamfer` | Partial | Equal-distance, same base limits as fillet. Need two distances, distance-angle, side flip, later histories. |
-| `shell` | Pending | Inward/outward, closed hollow body, one/multiple removed faces, thickness edits, later operations. |
+| `shell` | Partial | Inward/outward constant thickness, one forward blind polygonal extrusion on Front/Top/Right; closed or one end-cap opening. Thickness/parent-depth edits and save/reopen gated. Side openings, multiple removed faces, curved/holed profiles and later operations pending. |
 | `draft` | Pending | Neutral standard/reference plane or face, angle/reverse, multiple faces, parent edits. |
 | `hole` | Pending | Simple/clearance, tapped, counterbore, countersink; standard/custom sizes and fits; blind/through/reverse, drill point, thread depth, multiple positions, face/plane support. |
 | `linear_pattern` | Pending | Feature/body patterns, one/two directions, vectors/edge/face references, spacing/count/reverse, skipped instances, nested patterns. |

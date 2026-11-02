@@ -1109,6 +1109,11 @@ class Part:
         self.doc.export(path, fmt, features=features, require_native=require_native)
         return path
 
+    def solidworks_compatibility(self) -> dict:
+        """Check editable offline export without changing this part or writing an output file."""
+        from .core.swcompatibility import check
+        return check(self.doc)
+
     def export_solidworks_offline(self, path, *, features=True, require_native=False) -> dict:
         """Write .SLDPRT without COM; report native tree or whole-part solid fallback."""
         self._ensure_built()

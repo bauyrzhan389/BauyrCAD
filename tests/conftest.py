@@ -16,11 +16,20 @@ def beam_doc():
     return doc
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def sw():
-    """One private SolidWorks session shared by every real-SolidWorks test (tests that use it
-    are marked with sw_support.needs_solidworks)."""
+    """One private SolidWorks session per test family.
+
+    Closing documents alone does not reset all native application state after hundreds
+    of rebuilds. Isolate modules so earlier families cannot contaminate later relation
+    and save/reopen gates. Keep every assertion; do not retry failed exports.
+    """
     from sw_support import sw_session
+    from bauyrcad import solidworks
+    # Recheck at each launch, not only at collection: the user may open SolidWorks
+    # while a long run is underway. Never attach a new test family to that session.
+    if solidworks._running():
+        pytest.skip('SolidWorks is already running; leave the existing session untouched')
     yield from sw_session()
 
 

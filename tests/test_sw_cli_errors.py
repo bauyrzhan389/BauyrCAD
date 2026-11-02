@@ -13,7 +13,7 @@ def test_native_export_cli_returns_error_and_preserves_output(tmp_path, capsys, 
     if problem == 'reserved_name':
         part.doc.features[0].name = 'Front Plane'
     else:
-        part.shell(2, remove=part.face('+z'))
+        part.shell(2, remove=part.face('+x'))  # side-face shells are still unsupported offline
     source = tmp_path / 'source.bcad'
     part.save(source)
     destination = tmp_path / 'existing.SLDPRT'

@@ -179,6 +179,9 @@ def write(document, path, name='Part1'):
     from . import geometry
     if geometry.count_solids(document.body) != 1:
         raise UnsupportedFeature('Native writer currently requires one connected solid')
+    if any(f.TYPE == 'shell' for f in fs):
+        from .swshell import write
+        return write(document, path, name)
     if any(f.TYPE == 'ref_plane' for f in fs):
         from .swreferenceplanes import write
         return write(document, path, name)

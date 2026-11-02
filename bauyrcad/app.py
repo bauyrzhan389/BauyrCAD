@@ -215,14 +215,20 @@ def selftest(log_path: str | None = None) -> int:
         shared_sk.dim(shared_lines[1])
         shared_part.extrude(shared_sk, 11)
         shared_part.extrude(shared_sk, 7, reverse=True)
+        shell_part = Part('offline-shell')
+        shell_sk = shell_part.sketch('right')
+        shell_sk.rect((3, 5), (43, 27))
+        shell_part.extrude(shell_sk, 18)
+        shell_part.shell(2, remove=shell_part.face('+x'), outward=True)
+        assert shell_part.solidworks_compatibility()['ready']
         for offline_index, offline_model in enumerate((offline_part, shaft, face_part, face_cut,
-                                                       slot_part, polygon_part, plane_part, shared_part)):
+                                                       slot_part, polygon_part, plane_part, shared_part, shell_part)):
             offline_path = os.path.join(tmp, f'offline_{offline_index}.SLDPRT')
             offline_report = offline_model.export_solidworks_offline(offline_path, require_native=True)
             assert offline_report['native']
             assert not sldprt.tree_mismatches(offline_path,
                 [f.name for f in offline_model.doc.features], exact=True)
-        lines.append('offline editable SolidWorks export + bundled sketch/fillet/revolve/face/reference-plane donors ok')
+        lines.append('offline editable SolidWorks export + compatibility check + bundled sketch/fillet/revolve/face/reference-plane/shell donors ok')
         # SolidWorks export: bridge present; a real export only when asked (it runs SolidWorks)
         from . import solidworks
         sw_line = "solidworks bridge ok, SolidWorks " + ("found" if solidworks.available() else "not installed")

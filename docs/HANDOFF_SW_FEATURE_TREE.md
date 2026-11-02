@@ -1,5 +1,34 @@
 # Handoff: native SolidWorks files written by BauyrCAD, without SolidWorks
 
+## Compatibility and constant-thickness Shell milestone (2026-11-02)
+
+`Part.solidworks_compatibility()` checks the complete production writer on an isolated,
+regenerated document without COM or a destination file. The GUI shows readiness, blocking
+feature rows, practical suggestions and model-tree selection before the dedicated offline
+export save dialog. Generic editable exports also check. Remaining rows are explicitly
+not verified when blockers prevent a complete export; readiness is not a claim of an
+actual SolidWorks rebuild of that user's file.
+
+`core/swshell.py` adds constant-thickness inward/outward Shell after one polygonal forward
+blind extrusion on Front/Top/Right: closed or one end-cap opening. Thickness and parent
+depth edits and save/reopen are gated; six renamed polygon cases cover both directions.
+See format section 28. Side/multiple openings, curved/holed profiles and longer histories
+remain unsupported. Planar shell modelling now prefers sharp offset-face intersections
+to match SolidWorks' outward corners. The broader coverage backlog is still incomplete.
+
+Full regression: **1328 passed, no skips, 2495.70 s (41:35)**. An earlier one-session run
+had four late fixed-sketch/save/reopen/symmetric-relation failures; all five focused cases
+passed in a fresh session. Tests now isolate SolidWorks by module and recheck for an
+existing session before each launch. Assertions are unchanged; no failure retries.
+
+Windows executable and ZIP rebuilt; frozen self-test includes Shell and compatibility.
+Frozen/source Shell archive sections match exactly; ZIP CRC and executable identity pass.
+The rebuilt executable also exports Downloads/asdfasdf.bcad with its exact four-feature
+tree. Evidence: projects/sw_features/COMPATIBILITY_SESSION.md, compatibility_build/ and
+compatibility_full_isolated_tests.xml. GUI screenshots in out/compatibility_*.png inspected.
+No push authorized for this milestone. Preserve the user's uncommitted improvement log
+and research-roadmap changes.
+
 ## Current publication validation (2026-11-01)
 
 The user requested targeted REA research plus controlled references and SolidWorks rebuild

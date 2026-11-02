@@ -1,6 +1,12 @@
 # Changelog
 
 ## 0.4.0 (unreleased)
+- **Offline export compatibility check**: inspect the complete history before choosing a
+  destination, see blocking features and suggestions, and select them in the model tree.
+  The scripting API exposes the same check through `part.solidworks_compatibility()`.
+- **Native Shell export**: constant-thickness inward/outward shells on one forward blind
+  polygonal extrusion, closed or with one end-cap opening. Thickness and parent depth
+  remain editable. Planar shells now keep sharp offset corners to match SolidWorks.
 - **Real-window export demo**: a 37-second recording of BauyrCAD's offline export and
   SolidWorks' native feature editor, with a verified 20-to-35 mm dimension edit.
 - **Project introduction**: explain the personal engineering workflow behind BauyrCAD and

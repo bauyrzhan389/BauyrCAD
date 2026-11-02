@@ -216,9 +216,11 @@ def shell(shape, face_indices, thickness, outward=False):
     if thickness <= 0:
         raise GeometryError("The shell thickness must be positive")
     off = float(thickness) if outward else -float(thickness)
-    # Arc joins only fill gaps (outward at convex edges); inward walls still meet sharp. It
-    # also copes with fillets, where the intersection join fails - so try it first.
-    for join in (GeomAbs_Arc, GeomAbs_Intersection):
+    # Plane-wall shells use intersecting offset faces, matching SolidWorks' sharp
+    # corners in both directions. Curved/filleted bodies still prefer arc joins.
+    planar = all(face.is_planar for face in geometry.face_infos(shape))
+    joins = (GeomAbs_Intersection, GeomAbs_Arc) if planar else (GeomAbs_Arc, GeomAbs_Intersection)
+    for join in joins:
         try:
             if face_indices:
                 lst = TopTools_ListOfShape()

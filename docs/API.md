@@ -814,6 +814,9 @@ Variable-radius fillets, asymmetric chamfers, curved profiles, holes, reverse/mi
 extrusions and finishing features in longer histories explicitly fall back for now.
 
 ```python
+compatibility = part.solidworks_compatibility()
+# ready, summary, features (id/name/type/status), issues (feature_id/reason/suggestion).
+# Runs the offline writer on an isolated copy; no COM or destination file is used.
 report = part.export_solidworks_offline("part.SLDPRT", require_native=True)
 # Or: part.export("part.SLDPRT", features=True)
 # Core: swfile.write_part(doc, path, features=True)
@@ -843,6 +846,17 @@ unsupported face/reference planes and selected contours fall back with a reason.
 CLI: `python -m bauyrcad export part.bcad part.SLDPRT --features --require-native` prints the
 report as JSON. GUI: choose **File > Export editable SolidWorks part (offline)**, or
 **SolidWorks 2024 editable feature tree (no SolidWorks needed)** in Export/Save As.
+The GUI checks compatibility first and blocks editable export when design intent cannot
+be preserved. Select an affected row to see its reason and suggested alternative, or use
+**Select feature in model** to locate it. `ready` means the complete offline writer passed;
+it does not claim that SolidWorks has rebuilt this specific file. When blocked, other
+rows remain `not_checked` rather than claiming partial editable output.
+
+Constant-thickness Shell is supported on one forward blind polygonal extrusion on
+Front/Top/Right, inward or outward, either closed or with one removed end-cap face.
+Thickness and parent depth remain editable. Side openings, multiple removed faces,
+curved/holed profiles and longer histories remain explicit blockers. Planar shells use
+sharp offset-face intersections, including outward corners, matching SolidWorks.
 These GUI choices require a native tree: unsupported models show an error and do not
 replace the destination with an Imported body. For geometry-only output, choose the
 separate **exact solid** format. **Export using installed SolidWorks** uses COM.

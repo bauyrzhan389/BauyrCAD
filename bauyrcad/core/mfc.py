@@ -903,7 +903,12 @@ LAYOUTS.update({
     "moEdgeRef_c": LAYOUTS["moFaceRef_c"][:-1] + ["raw:4"],
 })
 LAYOUTS["moFeatureDimHandle_c"][2] = ("geometry", ("ifobj", "dim", "$class",
-    ("AngleDim_c", "ThreeDRadiusDim_c"), ["raw:76"], ["raw:124"]))
+    ("AngleDim_c",), ["raw:76"],
+    ["raw:72", ("has_vectors", "u16"), ("vectors", ("if", "has_vectors", (1,), ["raw:48"])), "u16"]))
+# SW2024 constant-thickness Shell, including nullable component-body reference.
+LAYOUTS['moShell_c'] = FEATURE + [
+    ('counters', 'raw:62'), ('pmark', 'obj'), ('faces', 'obj'), ('thickness', 'obj'),
+    ('outward', 'u8'), ('list1', 'obj'), ('list2', 'obj'), ('edge', 'obj'), ('solid_body', 'obj')]
 # Saved face-attached sketch planes (SW2024). Preserve existing positional keys.
 def _named_layout(layout):
     return [(name if name is not None else f'_{i}', typ)

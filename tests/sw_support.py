@@ -3,8 +3,8 @@ per-family tests/test_sw_<family>.py files).
 
 * ``needs_solidworks``: module mark - skip unless SolidWorks is installed and NOT already
   running (a running SolidWorks belongs to the user; set BAUYRCAD_SW_TESTS=1 to force).
-* ``sw`` fixture (tests/conftest.py, from :func:`sw_session`): ONE private SolidWorks
-  instance for the whole test run, started by the first test that asks for it; the
+* ``sw`` fixture (tests/conftest.py, from :func:`sw_session`): one private SolidWorks
+  instance per test module, started by the first test that asks for it; the
   documents a test opens are closed when it ends, pass or fail (close_new_documents).
 * doc_steps: the BauyrCAD steps a saved file must hold - build expected trees from the
   Document, never from the exporter's own report.features.
@@ -53,7 +53,7 @@ needs_solidworks = pytest.mark.skipif(not solidworks_usable(),
 
 
 def sw_session():
-    """Generator behind the session-scoped ``sw`` fixture of tests/conftest.py."""
+    """Generator behind the module-scoped ``sw`` fixture of tests/conftest.py."""
     import faulthandler
     was = faulthandler.is_enabled()
     faulthandler.disable()       # COM's handled RPC exceptions look 'fatal' to faulthandler

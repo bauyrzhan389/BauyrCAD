@@ -1334,6 +1334,8 @@ class MainWindow(QMainWindow):
         if not self.doc.has_body():
             QMessageBox.information(self, "Export", "There is no solid body to export yet.")
             return None
+        if not self._solidworks_preflight():
+            return None
         if path is None:
             stem = self.doc.path.stem if self.doc.path else "Part1"
             path, _ = QFileDialog.getSaveFileName(
@@ -1346,7 +1348,20 @@ class MainWindow(QMainWindow):
         if Path(path).suffix.lower() != '.sldprt':
             path += '.SLDPRT'
         self._remember_dir(path)
-        return path if self._export_to(path, exchange.FORMATS['sldprt_features']) else None
+        return path if self._export_to(path, exchange.FORMATS['sldprt_features'], preflight=False) else None
+
+    def _solidworks_preflight(self):
+        from ..core.swcompatibility import check
+        from .swcompatibility import CompatibilityDialog
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            report = check(self.doc)
+        except Exception as error:
+            QMessageBox.critical(self, 'Export compatibility', f'Could not check this model:\n\n{error}')
+            return False
+        finally:
+            QApplication.restoreOverrideCursor()
+        return bool(CompatibilityDialog(report, self).exec())
 
     def export_solidworks(self, path=None):
         """File > Export to SolidWorks: native .SLDPRT with an editable feature tree."""
@@ -2096,9 +2111,11 @@ class MainWindow(QMainWindow):
             self._remember_dir(path)
             self._export_to(path, fmt)
 
-    def _export_to(self, path, fmt) -> bool:
+    def _export_to(self, path, fmt, *, preflight=True) -> bool:
         if not self.doc.has_body():
             QMessageBox.information(self, "Export", "There is no solid body to export yet.")
+            return False
+        if fmt.key == 'sldprt_features' and preflight and not self._solidworks_preflight():
             return False
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
