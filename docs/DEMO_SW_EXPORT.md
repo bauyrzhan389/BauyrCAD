@@ -1,9 +1,12 @@
 # Editable SolidWorks export demo
 
-![Build in BauyrCAD, export offline, edit and reopen in SolidWorks](media/solidworks-export-demo-v2.gif)
+![Build in BauyrCAD, export offline, edit and reopen in SolidWorks](media/solidworks-export-animated-v3.gif)
 
-This 24-second captioned animation uses a real BauyrCAD window capture and model images
-exported by SolidWorks. It is an **API-driven demonstration, not a continuous mouse recording**.
+This 20-second looping animation combines a real BauyrCAD window capture, 48 rotating
+views rendered from its model geometry, and 61 actual SolidWorks dimension-edit/rebuild
+captures. The boss grows continuously from 20 to 35 mm; every captured state has a clean
+rebuild and a volume matching the analytic geometry. Playback is edited and accelerated;
+the export progress graphic is a presentation transition, not a timing measurement. It is an **API-driven demonstration, not a continuous mouse recording**.
 The native feature list and dimension values are read from SolidWorks; the side panel is an
 explanatory overlay, not a recreation of its user interface. Captures were made on 2026-11-02.
 No licence or endorsement claim is made by this demo.
@@ -28,7 +31,8 @@ No licence or endorsement claim is made by this demo.
 
 Both volumes match the analytic plate + boss − through-hole calculation. The boss depth
 is measured from the front plane, so its protrusion above the 8 mm plate changes from
-12 mm to 27 mm. [Machine-readable validation results](media/solidworks-export-validation.json).
+12 mm to 27 mm. [Machine-readable validation results](media/solidworks-export-validation.json), including
+all 61 animation states and the final saved-file reopen check.
 
 ## Reproduce the model
 

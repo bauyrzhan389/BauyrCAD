@@ -15,11 +15,11 @@ Coverage is still growing: this is an experimental exporter, and some features a
 mates aren't supported yet. The [coverage tracker](docs/SW_FEATURE_COVERAGE.md) shows exactly
 where it stands.
 
-![BauyrCAD offline export followed by a native dimension edit in SolidWorks](docs/media/solidworks-export-demo-v2.gif)
+![BauyrCAD offline export followed by a native dimension edit in SolidWorks](docs/media/solidworks-export-animated-v3.gif)
 
-**24-second demo:** build in BauyrCAD, export with SolidWorks closed, then change the boss
-depth from 20 to 35 mm in SolidWorks and reopen the saved result. Captioned, API-driven
-demonstration using actual application images. [Example and validation](docs/DEMO_SW_EXPORT.md).
+**20-second animated demo:** rotate the BauyrCAD model, export with SolidWorks closed,
+then watch the boss grow from 20 to 35 mm through actual SolidWorks rebuilds. The saved
+result reopens with its native features intact. API-driven captures, edited for playback. [Example and validation](docs/DEMO_SW_EXPORT.md).
 
 Built with Python, OpenCASCADE, PySide6, and an in-house sketch constraint solver.
 You can use the desktop interface or describe a model in code, then keep editing the same part.

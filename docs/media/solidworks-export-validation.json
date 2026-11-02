@@ -307,5 +307,408 @@
         ]
       ]
     }
-  ]
+  ],
+  "animation": {
+    "duration_seconds": 20,
+    "target_frames": 240,
+    "bauyrcad_orbit_views": 48,
+    "solidworks_rebuild_frames": [
+      {
+        "frame": 0,
+        "boss_height_mm": 20.0,
+        "volume_mm3": 33927.07921065854,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 1,
+        "boss_height_mm": 20.01236111111111,
+        "volume_mm3": 33933.29258279565,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 2,
+        "boss_height_mm": 20.04888888888889,
+        "volume_mm3": 33951.65344652662,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 3,
+        "boss_height_mm": 20.10875,
+        "volume_mm3": 33981.74292283101,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 4,
+        "boss_height_mm": 20.191111111111113,
+        "volume_mm3": 34023.14213268831,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 5,
+        "boss_height_mm": 20.29513888888889,
+        "volume_mm3": 34075.43219707806,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 6,
+        "boss_height_mm": 20.42,
+        "volume_mm3": 34138.194236979776,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 7,
+        "boss_height_mm": 20.56486111111111,
+        "volume_mm3": 34211.00937337298,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 8,
+        "boss_height_mm": 20.72888888888889,
+        "volume_mm3": 34293.458727237194,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 9,
+        "boss_height_mm": 20.91125,
+        "volume_mm3": 34385.12341955193,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 10,
+        "boss_height_mm": 21.11111111111111,
+        "volume_mm3": 34485.58457129673,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 11,
+        "boss_height_mm": 21.327638888888888,
+        "volume_mm3": 34594.42330345109,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 12,
+        "boss_height_mm": 21.56,
+        "volume_mm3": 34711.22073699455,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 13,
+        "boss_height_mm": 21.80736111111111,
+        "volume_mm3": 34835.55799290663,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 14,
+        "boss_height_mm": 22.06888888888889,
+        "volume_mm3": 34967.01619216684,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 15,
+        "boss_height_mm": 22.34375,
+        "volume_mm3": 35105.176455754714,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 16,
+        "boss_height_mm": 22.63111111111111,
+        "volume_mm3": 35249.61990464976,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 17,
+        "boss_height_mm": 22.93013888888889,
+        "volume_mm3": 35399.92765983151,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 18,
+        "boss_height_mm": 23.24,
+        "volume_mm3": 35555.680842279486,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 19,
+        "boss_height_mm": 23.55986111111111,
+        "volume_mm3": 35716.46057297321,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 20,
+        "boss_height_mm": 23.88888888888889,
+        "volume_mm3": 35881.847972892196,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 21,
+        "boss_height_mm": 24.22625,
+        "volume_mm3": 36051.42416301596,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 22,
+        "boss_height_mm": 24.57111111111111,
+        "volume_mm3": 36224.77026432404,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 23,
+        "boss_height_mm": 24.92263888888889,
+        "volume_mm3": 36401.46739779594,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 24,
+        "boss_height_mm": 25.28,
+        "volume_mm3": 36581.096684411204,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 25,
+        "boss_height_mm": 25.64236111111111,
+        "volume_mm3": 36763.23924514932,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 26,
+        "boss_height_mm": 26.00888888888889,
+        "volume_mm3": 36947.47620098985,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 27,
+        "boss_height_mm": 26.37875,
+        "volume_mm3": 37133.38867291228,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 28,
+        "boss_height_mm": 26.75111111111111,
+        "volume_mm3": 37320.55778189616,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 29,
+        "boss_height_mm": 27.125138888888888,
+        "volume_mm3": 37508.564648920976,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 30,
+        "boss_height_mm": 27.5,
+        "volume_mm3": 37696.990394966284,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 31,
+        "boss_height_mm": 27.874861111111112,
+        "volume_mm3": 37885.4161410116,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 32,
+        "boss_height_mm": 28.24888888888889,
+        "volume_mm3": 38073.42300803643,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 33,
+        "boss_height_mm": 28.621250000000003,
+        "volume_mm3": 38260.59211702031,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 34,
+        "boss_height_mm": 28.99111111111111,
+        "volume_mm3": 38446.504588942735,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 35,
+        "boss_height_mm": 29.35763888888889,
+        "volume_mm3": 38630.74154478326,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 36,
+        "boss_height_mm": 29.72,
+        "volume_mm3": 38812.884105521385,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 37,
+        "boss_height_mm": 30.077361111111113,
+        "volume_mm3": 38992.51339213664,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 38,
+        "boss_height_mm": 30.42888888888889,
+        "volume_mm3": 39169.21052560854,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 39,
+        "boss_height_mm": 30.77375,
+        "volume_mm3": 39342.55662691662,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 40,
+        "boss_height_mm": 31.11111111111111,
+        "volume_mm3": 39512.132817040394,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 41,
+        "boss_height_mm": 31.440138888888885,
+        "volume_mm3": 39677.52021695936,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 42,
+        "boss_height_mm": 31.759999999999998,
+        "volume_mm3": 39838.29994765309,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 43,
+        "boss_height_mm": 32.06986111111111,
+        "volume_mm3": 39994.05313010107,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 44,
+        "boss_height_mm": 32.36888888888889,
+        "volume_mm3": 40144.36088528282,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 45,
+        "boss_height_mm": 32.65625,
+        "volume_mm3": 40288.804334177876,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 46,
+        "boss_height_mm": 32.93111111111111,
+        "volume_mm3": 40426.96459776574,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 47,
+        "boss_height_mm": 33.19263888888889,
+        "volume_mm3": 40558.42279702597,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 48,
+        "boss_height_mm": 33.44,
+        "volume_mm3": 40682.76005293803,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 49,
+        "boss_height_mm": 33.672361111111115,
+        "volume_mm3": 40799.5574864815,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 50,
+        "boss_height_mm": 33.88888888888889,
+        "volume_mm3": 40908.396218635855,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 51,
+        "boss_height_mm": 34.08875,
+        "volume_mm3": 41008.857370380654,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 52,
+        "boss_height_mm": 34.27111111111111,
+        "volume_mm3": 41100.52206269539,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 53,
+        "boss_height_mm": 34.435138888888886,
+        "volume_mm3": 41182.971416559594,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 54,
+        "boss_height_mm": 34.58,
+        "volume_mm3": 41255.786552952806,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 55,
+        "boss_height_mm": 34.704861111111114,
+        "volume_mm3": 41318.54859285453,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 56,
+        "boss_height_mm": 34.80888888888889,
+        "volume_mm3": 41370.83865724428,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 57,
+        "boss_height_mm": 34.89125,
+        "volume_mm3": 41412.237867101576,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 58,
+        "boss_height_mm": 34.95111111111111,
+        "volume_mm3": 41442.32734340597,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 59,
+        "boss_height_mm": 34.98763888888889,
+        "volume_mm3": 41460.68820713695,
+        "rebuild": "clean"
+      },
+      {
+        "frame": 60,
+        "boss_height_mm": 35.0,
+        "volume_mm3": 41466.90157927404,
+        "rebuild": "clean"
+      }
+    ],
+    "saved_and_reopened": {
+      "boss_height_mm": 35.0,
+      "volume_mm3": 41466.90157927405,
+      "rebuild": "clean",
+      "features": [
+        "Comments",
+        "Favorites",
+        "History",
+        "Selection Sets",
+        "Sensors",
+        "Design Binder",
+        "Annotations",
+        "Surface Bodies",
+        "Solid Bodies",
+        "Lights and Cameras",
+        "Markups",
+        "Equations",
+        "Material <not specified>",
+        "Front Plane",
+        "Top Plane",
+        "Right Plane",
+        "Origin",
+        "Sketch1",
+        "Boss-Extrude1",
+        "Sketch2",
+        "Boss-Extrude2",
+        "Sketch3",
+        "Cut-Extrude1"
+      ]
+    }
+  }
 }
