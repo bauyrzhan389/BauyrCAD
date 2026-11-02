@@ -1,9 +1,8 @@
 # Changelog
 
 ## 0.4.0 (unreleased)
-- **Animated editable-export demo**: a 20-second README loop with continuous model rotation,
-  61 actual SolidWorks dimension-edit/rebuild captures, a reproducible mounting-plate example,
-  and saved-file reopen validation.
+- **Real-window export demo**: a 37-second recording of BauyrCAD's offline export and
+  SolidWorks' native feature editor, with a verified 20-to-35 mm dimension edit.
 - **Project introduction**: explain the personal engineering workflow behind BauyrCAD and
   highlight experimental editable SolidWorks-format export as the main focus.
 - **Origin-anchored sketches offline**: explicit sketch-origin references remain constrained

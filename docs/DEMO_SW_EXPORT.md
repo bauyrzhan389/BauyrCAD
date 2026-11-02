@@ -1,39 +1,37 @@
 # Editable SolidWorks export demo
 
-![Build in BauyrCAD, export offline, edit and reopen in SolidWorks](media/solidworks-export-animated-v4.gif)
+![BauyrCAD offline export and a dimension edit in the actual SolidWorks window](media/solidworks-window-demo-v6.gif)
 
-This 20-second looping animation combines a real BauyrCAD window capture, 48 rotating
-views rendered from its model geometry, and 61 actual SolidWorks dimension-edit/rebuild
-captures. The boss grows continuously from 20 to 35 mm; every captured state has a clean
-rebuild and a volume matching the analytic geometry. The presentation uses black, white and neutral gray; application captures are shown in grayscale.
-Playback is edited and accelerated;
-the export progress graphic is a presentation transition, not a timing measurement. It is an **API-driven demonstration, not a continuous mouse recording**.
-The native feature list and dimension values are read from SolidWorks; the side panel is an
-explanatory overlay, not a recreation of its user interface. Captures were made on 2026-11-02.
+[Watch the full-resolution video](media/solidworks-window-demo-v6.mp4).
+
+This 37-second recording shows the real BauyrCAD and SolidWorks interfaces: the offline
+export menu and save dialog, the native feature tree, and the Boss-Extrude2 PropertyManager.
+The depth is entered as 35 mm in the actual editor, then accepted and rebuilt.
+
+Idle time is removed and some sections are accelerated. The footage is grayscale, and
+status bars are cropped. There are no recreated controls or presentation panels. The
+SolidWorks API selects the feature and opens its native editor; keyboard input enters and
+accepts the dimension. API readback independently verifies the result. Recorded on 2026-11-02.
 No licence or endorsement claim is made by this demo.
 
 ## What it demonstrates
 
-1. BauyrCAD creates an 80 × 45 × 8 mm plate, a 28 mm diameter boss with 20 mm extrusion
-   depth from the front plane, and a 12 mm diameter through-hole.
-2. `export_solidworks_offline(..., require_native=True)` writes the `.SLDPRT`. No SolidWorks
-   process was running before or after this export. The report contains six native entries
-   and no warnings: three sketches, two bosses and one cut.
-3. SolidWorks opens and rebuilds the exported file with native features.
-4. Its own API changes `D1@Boss-Extrude2` from 0.020 m to 0.035 m, then rebuilds.
-5. The edited file is saved, closed and reopened. The dimension remains 35 mm, and the native
-   features and rebuilt geometry persist.
+1. The BauyrCAD model is an 80 × 45 × 8 mm plate, a 28 mm diameter boss with 20 mm
+   extrusion depth from the front plane, and a 12 mm diameter through-hole.
+2. File > Export editable SolidWorks part (offline) writes the native `.SLDPRT`.
+   No SolidWorks process was running when this recorded export completed.
+3. SolidWorks opens the exported part with native sketches, bosses and a cut.
+4. The Boss-Extrude2 editor changes its depth from 20 to 35 mm and rebuilds the model.
+5. Readback confirms a 35 mm depth, a clean rebuild, and a volume of 41,466.9016 mm³.
+   The edited file is saved.
 
-| State | Boss extrusion depth | Volume | Rebuild |
-|---|---:|---:|---|
-| Offline file opened in SolidWorks | 20 mm | 33,927.0792 mm³ | Clean |
-| Dimension edited in SolidWorks | 35 mm | 41,466.9016 mm³ | Clean |
-| Edited file saved and reopened | 35 mm | 41,466.9016 mm³ | Clean |
+The depth is measured from the front plane, so the boss protrusion above the 8 mm plate
+changes from 12 to 27 mm. The volume matches the analytic plate + boss − through-hole
+calculation. A separate earlier validation of this same model also verified that the 35 mm
+dimension and native features survive saving, closing and reopening.
 
-Both volumes match the analytic plate + boss − through-hole calculation. The boss depth
-is measured from the front plane, so its protrusion above the 8 mm plate changes from
-12 mm to 27 mm. [Machine-readable validation results](media/solidworks-export-validation.json), including
-all 61 animation states and the final saved-file reopen check.
+[Machine-readable validation results](media/solidworks-export-validation.json) include the
+recorded UI edit and the earlier API-driven rebuild/reopen checks.
 
 ## Reproduce the model
 

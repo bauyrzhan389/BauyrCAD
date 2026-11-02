@@ -15,11 +15,12 @@ Coverage is still growing: this is an experimental exporter, and some features a
 mates aren't supported yet. The [coverage tracker](docs/SW_FEATURE_COVERAGE.md) shows exactly
 where it stands.
 
-![BauyrCAD offline export followed by a native dimension edit in SolidWorks](docs/media/solidworks-export-animated-v4.gif)
+![BauyrCAD offline export followed by a native dimension edit in SolidWorks](docs/media/solidworks-window-demo-v6.gif)
 
-**20-second animated demo:** rotate the BauyrCAD model, export with SolidWorks closed,
-then watch the boss grow from 20 to 35 mm through actual SolidWorks rebuilds. The saved
-result reopens with its native features intact. API-driven captures, edited for playback. [Example and validation](docs/DEMO_SW_EXPORT.md).
+**37-second window recording:** export an editable part from BauyrCAD, then change
+Boss-Extrude2 from 20 to 35 mm in SolidWorks' actual feature editor and rebuild.
+Real application windows, with idle time removed and a neutral grayscale finish.
+[Video](docs/media/solidworks-window-demo-v6.mp4) · [Example and validation](docs/DEMO_SW_EXPORT.md).
 
 Built with Python, OpenCASCADE, PySide6, and an in-house sketch constraint solver.
 You can use the desktop interface or describe a model in code, then keep editing the same part.

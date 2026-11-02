@@ -710,5 +710,17 @@
         "Cut-Extrude1"
       ]
     }
+  },
+  "window_recording": {
+    "duration_seconds": 37,
+    "method": "Real application windows; CAD API opens native feature editor; keyboard input edits and accepts dimension",
+    "presentation": "Idle time removed; some segments accelerated; grayscale; status bars cropped",
+    "solidworks_running_during_gui_export": false,
+    "result": {
+      "dimension_mm": 35.0,
+      "volume_mm3": 41466.90157927404,
+      "rebuild": "clean",
+      "edited_through": "SolidWorks user interface"
+    }
   }
 }
