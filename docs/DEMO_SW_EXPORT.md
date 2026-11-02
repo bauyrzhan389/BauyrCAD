@@ -1,11 +1,12 @@
 # Editable SolidWorks export demo
 
-![Build in BauyrCAD, export offline, edit and reopen in SolidWorks](media/solidworks-export-animated-v3.gif)
+![Build in BauyrCAD, export offline, edit and reopen in SolidWorks](media/solidworks-export-animated-v4.gif)
 
 This 20-second looping animation combines a real BauyrCAD window capture, 48 rotating
 views rendered from its model geometry, and 61 actual SolidWorks dimension-edit/rebuild
 captures. The boss grows continuously from 20 to 35 mm; every captured state has a clean
-rebuild and a volume matching the analytic geometry. Playback is edited and accelerated;
+rebuild and a volume matching the analytic geometry. The presentation uses black, white and neutral gray; application captures are shown in grayscale.
+Playback is edited and accelerated;
 the export progress graphic is a presentation transition, not a timing measurement. It is an **API-driven demonstration, not a continuous mouse recording**.
 The native feature list and dimension values are read from SolidWorks; the side panel is an
 explanatory overlay, not a recreation of its user interface. Captures were made on 2026-11-02.

@@ -15,7 +15,7 @@ Coverage is still growing: this is an experimental exporter, and some features a
 mates aren't supported yet. The [coverage tracker](docs/SW_FEATURE_COVERAGE.md) shows exactly
 where it stands.
 
-![BauyrCAD offline export followed by a native dimension edit in SolidWorks](docs/media/solidworks-export-animated-v3.gif)
+![BauyrCAD offline export followed by a native dimension edit in SolidWorks](docs/media/solidworks-export-animated-v4.gif)
 
 **20-second animated demo:** rotate the BauyrCAD model, export with SolidWorks closed,
 then watch the boss grow from 20 to 35 mm through actual SolidWorks rebuilds. The saved
