@@ -39,6 +39,11 @@ You can use the desktop interface or describe a model in code, then keep editing
 | Import: STEP, IGES, BREP. Native `.bcad` project file | Deformed plots, mesh overlay, legend clipping, VTU export for ParaView |
 | AutoCAD-style command line: just type (`L`, `REC`, `TR`, `@50<30`) | |
 
+**Inspect your model:** use Section View to look inside, Measure and Bounding Box for
+sizes, Mass Properties for weight and inertia, and assembly clearance/interference checks
+for fits. Hide or isolate components, check solid geometry, and save inspection images.
+See the [inspection guide](docs/EVALUATE.md) for controls, commands and limitations.
+
 ### Sketch tools
 
 | Draw | Modify | Dimensions & relations |

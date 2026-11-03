@@ -32,6 +32,40 @@ def selftest(log_path: str | None = None) -> int:
         doc.add_feature(ExtrudeFeature(s.id, 100))
         doc.regenerate()
         lines.append(f"volume {geometry.volume(doc.body):.3f} (expected 10000)")
+        from .core import measure
+        from .gui.measure_window import MeasureWindow  # verify frozen Evaluate imports
+        bounds = measure.model_dimensions(doc.body)
+        assert np.allclose(bounds['size'], (10, 10, 100))
+        measurement = measure.measure(doc.body, [('point', (0, 0, 0)), ('point', (25.4, 0, 0))])
+        assert any('1.00 in' in text for text in measure.report(measurement, unit='in', decimals=2))
+        lines.append('evaluate: world dimensions, exact points and inch display OK')
+        from .core import mass_properties
+        from .gui.mass_properties_window import MassPropertiesWindow
+        physical = mass_properties.part(doc.body, mass_properties.material(density=1000))
+        assert np.isclose(physical['mass'], .01)
+        assert np.allclose(physical['center_of_gravity'], (5, 5, 50))
+        assert np.allclose(np.diag(physical['inertia']), (.01*10100/12, .01*10100/12, .01*200/12))
+        lines.append('mass properties: density, mass, centre of gravity and inertia OK')
+        assert 'Mass: 10 g' in mass_properties.report(physical, length_unit='cm', mass_unit='g')
+        lines.append('mass report: converted units OK')
+        from .core import geometry_check
+        from .gui.geometry_check_window import GeometryCheckWindow
+        assert geometry_check.part(doc)['closed_solid']
+        lines.append('geometry check: frozen solid validation OK')
+        from .core.assembly import Assembly as EvaluationAssembly, Component as EvaluationComponent, Pose
+        from .gui.interference_window import InterferenceWindow
+        overlap_asm = EvaluationAssembly()
+        for i, offset in enumerate((0, 5)):
+            comp = EvaluationComponent(str(i), f'Block {i+1}', '', Pose(t=(offset, 0, 0)))
+            comp.shape = doc.body
+            overlap_asm.components.append(comp)
+        hits = overlap_asm.interference(strict=True, include_shapes=True)
+        assert len(hits) == 1 and np.isclose(hits[0]['volume'], 5000)
+        lines.append('interference: complete check and overlap solid OK')
+        from .gui.clearance_window import ClearanceWindow
+        gap = overlap_asm.clearance('0', '1', strict=True)
+        assert gap['distance'] == 0 and np.isclose(gap['overlap'], 5000)
+        lines.append('clearance: complete distance and overlap check OK')
         step = os.path.join(tempfile.gettempdir(), "bauyrcad_selftest.step")
         doc.export_step(step)
         d2 = Document()
@@ -279,6 +313,44 @@ def selftest(log_path: str | None = None) -> int:
         v._orbit_pivot = None
         lines.append(f"cursor rotation pivot {'ok' if ok_orbit else 'FAILED'}")
         win.dirty = False
+        from .gui.section_view import SectionWindow
+        assert len(win.background_actions.actions()) == 3
+        assert len(win.display_actions.actions()) == 2
+        saved_style = win.viewer.display_style
+        win.viewer.display_style = 'shaded'
+        win.viewer.render()
+        assert not win.viewer.plotter.actors['body_edges'].GetVisibility()
+        win.viewer.display_style = saved_style
+        win.viewer.render()
+        lines.append('display style: frozen edge visibility OK')
+        section = win.show_section()
+        assert win.viewer.section.active
+        assert win.left.currentWidget() is section.panel
+        section.angles[0].setValue(25)
+        assert abs(win.viewer.section.plane.GetNormal()[1]) > .1
+        section.accept()
+        assert win.viewer.section.active and win.left.currentWidget() is win.tree
+        section.close()
+        assert not win.viewer.section.active
+        lines.append("section view: frozen controls and display restore OK")
+        from .gui.view_image import capture
+        image = capture(win.viewer, background="white")
+        assert not image.isNull() and image.width() > 0
+        lines.append("viewport image: frozen capture OK")
+        mass_window = win.show_mass_properties()
+        mass_window.result = physical
+        mass_window.axes.setChecked(True)
+        assert all(f'mass_axis_{i}_lines' in win.viewer.plotter.actors for i in range(3))
+        mass_window.close()
+        lines.append("mass display: frozen principal-axis controls OK")
+        from .gui.assembly_window import AssemblyWindow
+        assembly_window = AssemblyWindow(assembly=overlap_asm)
+        assembly_window.visibility.isolate('0')
+        assert sum(actor.GetVisibility() for actor, _, _ in assembly_window.viewer._asm.values()) == 1
+        assembly_window.visibility.show_all()
+        assembly_window.dirty = False
+        assembly_window.close()
+        lines.append('assembly visibility: frozen controls OK')
         win.close()
         # the bundled Intel MKL must load: PARDISO is the solver big models depend on
         ok_pardiso = summ["method"] == "PARDISO"

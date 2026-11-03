@@ -1,6 +1,57 @@
 # Changelog
 
 ## 0.4.0 (unreleased)
+- **Reliable line input**: a continuing line/centerline adds one endpoint per press;
+  mouse movement before release no longer adds an extra endpoint. First-point drag drawing remains available.
+- **Interactive Section View**: docked PropertyManager, plane shortcuts, numeric offset/X/Y
+  rotations, draggable move arrow and rotation rings, and Keep Section. Model geometry stays
+  unchanged; exported viewport images omit the editing handles.
+- **CAD workspace layout**: FeatureManager/PropertyManager tabs, CommandManager tabs below
+  the tools, tabbed assembly commands, and a compact viewport view toolbar.
+- **Display Style**: switch between Shaded and Shaded with Edges for part/assembly views.
+  The shared preference survives rebuilds and respects hidden components; analysis-result
+  mesh/undeformed outlines keep their own controls.
+- **Check Geometry in Evaluate**: inspect kernel validity, closed solid bodies, loose
+  geometry and topology counts. Missing components, failed features and kernel errors
+  produce incomplete reports. The API exposes the same read-only checks. Inspection
+  cancellation is retained when a progress bar reaches its final step.
+- **Angled Section View**: select built reference planes (including transformed assembly
+  component planes) or pick a planar face, then offset/flip the display cut. Plane choices
+  are world-space snapshots and do not add features or change model geometry.
+- **Assembly inspection visibility**: Hide/Show, Isolate, Show All and Zoom to Selected
+  work from component context menus, View and commands. Hidden components cannot be
+  measured or picked; visible-component bounding boxes reject missing geometry. Visibility
+  is temporary and does not change saved models, exports or mass properties.
+- **Inspection UI**: persistent white/neutral/classic viewport backgrounds, distinct
+  Evaluate icons and a separate assembly View/Evaluate toolbar row. Section View toggles
+  off from its action or Escape, and cursor orbit respects the retained section.
+- **Mass Properties display**: choose length/mass units and report precision without
+  recalculating geometry, and show the three principal inertia axes through the centre
+  of gravity. Display choices leave saved materials and numerical API units unchanged.
+- **Save / Copy View Image**: export the viewport, including sections and inspection
+  labels, at 1×/2×/3× resolution with white, current or transparent backgrounds.
+  PNG saving is atomic; capture restores the current display settings on failure.
+- **Minimum Clearance in Evaluate**: measure a chosen component pair or the nearest
+  neighbour, highlight the closest world points, compare against a required gap, and
+  distinguish contact from interference. Missing or invalid solids produce incomplete
+  checks; moving/rebuilding the assembly clears stale results.
+- **Section View**: inspect part and assembly interiors with Front/Top/Right cut planes,
+  a position slider, numeric offset, direction flip and optional caps that preserve holes.
+  Original visible faces/edges remain selectable; closing restores the full model.
+  Sectioning is display-only and pauses during sketch editing and analysis results.
+- **Interference Detection in Evaluate**: assembly overlap volumes and red intersection
+  solids through transparent components, adjustable volume threshold, temporary pair
+  exclusions, copyable reports and cancellation. Results clear after model/pose changes;
+  missing geometry and failed intersections produce an incomplete check, never a clean result.
+- **Mass Properties in Evaluate**: volume, surface area, mass, centre of gravity, inertia
+  tensors about the CG/world origin, and principal moments/axes for parts and assemblies.
+  Saved physical materials and per-instance overrides are independent of FEA studies.
+  Missing densities remain explicit; rotated components use the parallel-axis theorem.
+- **Evaluate measurements**: visible Evaluate tools for parts and assemblies, with face,
+  edge, vertex and surface-point selection; minimum/centre/axis distances, circular maximum
+  distances, angles, XYZ differences, units and precision, copyable reports and session
+  history. Bounding Box shows overall world-axis dimensions. Assembly measurements use
+  transformed component geometry and clear when poses or geometry change.
 - **Offline export compatibility check**: inspect the complete history before choosing a
   destination, see blocking features and suggestions, and select them in the model tree.
   The scripting API exposes the same check through `part.solidworks_compatibility()`.

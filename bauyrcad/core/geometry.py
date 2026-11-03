@@ -562,6 +562,25 @@ def vertex_point(shape, index: int) -> np.ndarray:
     return _xyz(BRep_Tool.Pnt_s(TopoDS.Vertex_s(subshape(shape, "vertex", index))))
 
 
+def point_shape(point):
+    """An exact vertex for point-to-geometry measurements, in model coordinates."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
+    p = np.asarray(point, dtype=float)
+    if p.shape != (3,) or not np.all(np.isfinite(p)):
+        raise GeometryError('A measurement point needs three finite coordinates')
+    return BRepBuilderAPI_MakeVertex(gp_Pnt(*map(float, p))).Vertex()
+
+
+def measurement_bounds(shape):
+    """Tight world-axis bounds without tessellation or added shape tolerances."""
+    box = Bnd_Box()
+    BRepBndLib.AddOptimal_s(shape, box, False, False)
+    if box.IsVoid():
+        raise GeometryError('There is no geometry to evaluate')
+    values = box.Get()
+    return np.array(values[:3]), np.array(values[3:])
+
+
 def box_distance(lo_a, hi_a, lo_b, hi_b) -> float:
     """Distance between two axis-aligned boxes (0 if they overlap): a lower bound of the
     distance between what they contain."""
@@ -584,6 +603,49 @@ def fix_shape(shape):
     return f.Shape()
 
 
+def check_geometry(shape) -> dict:
+    """Read-only solid suitability report; failed queries remain explicitly incomplete."""
+    result = dict(complete=True, valid=None, closed_solid=False, solids=0, faces=0,
+                  edges=0, vertices=0, volume=None, issues=[])
+    if shape is None or shape.IsNull():
+        result['complete'] = False
+        result['issues'].append('No geometry is available')
+        return result
+    try:
+        result['valid'] = bool(BRepCheck_Analyzer(shape).IsValid())
+        maps = {name: indexed_map(shape, kind) for name, kind in
+                [('solids', TopAbs_SOLID), ('faces', TopAbs_FACE),
+                 ('edges', TopAbs_EDGE), ('vertices', TopAbs_VERTEX)]}
+        result.update({name: len(items) for name, items in maps.items()})
+        if not result['valid']:
+            result['issues'].append('OpenCASCADE reports invalid topology or geometry')
+        if not maps['solids']:
+            result['issues'].append('The shape contains no solid bodies')
+        else:
+            solids = compound(list(maps['solids']))
+            if len(indexed_map(solids, TopAbs_FACE)) != result['faces']:
+                result['issues'].append('Surface faces exist outside solid bodies')
+            if len(indexed_map(solids, TopAbs_EDGE)) != result['edges']:
+                result['issues'].append('Edges exist outside solid bodies')
+            if len(indexed_map(solids, TopAbs_VERTEX)) != result['vertices']:
+                result['issues'].append('Vertices exist outside solid bodies')
+            from OCP.TopAbs import TopAbs_SHELL
+            if any(not BRep_Tool.IsClosed_s(shell) for shell in indexed_map(shape, TopAbs_SHELL)):
+                result['issues'].append('The shape contains open shells')
+            if not result['issues']:
+                volumes = [float(volume(solid)) for solid in maps['solids']]
+                if any(not np.isfinite(value) or value <= 0 for value in volumes):
+                    result['issues'].append('A solid has non-positive or non-finite oriented volume')
+                else:
+                    result['volume'] = sum(volumes)
+                    result['closed_solid'] = True
+    except Exception as error:
+        result['complete'] = False
+        result['closed_solid'] = False
+        result['issues'].append(f'Geometry check could not finish: {error}')
+    return result
+
+
 def is_valid(shape) -> bool:
     return BRepCheck_Analyzer(shape).IsValid()
 
@@ -603,6 +665,37 @@ def center_of_mass(shape) -> np.ndarray:
     props = GProp_GProps()
     BRepGProp.VolumeProperties_s(shape, props)
     return _xyz(props.CentreOfMass())
+
+
+def require_closed_solids(shape):
+    """Reject invalid or open surface geometry for solid evaluation tools."""
+    if shape is None or shape.IsNull() or not BRepCheck_Analyzer(shape).IsValid():
+        raise GeometryError('Mass properties require valid closed solid geometry')
+    solids = list(indexed_map(shape, TopAbs_SOLID))
+    if not solids or len(indexed_map(compound(solids), TopAbs_FACE)) != len(indexed_map(shape, TopAbs_FACE)):
+        raise GeometryError('Mass properties require solids without open surface bodies')
+    from OCP.TopAbs import TopAbs_SHELL
+    for shell in indexed_map(shape, TopAbs_SHELL):
+        if not BRep_Tool.IsClosed_s(shell):
+            raise GeometryError('Mass properties require closed shells')
+
+
+def solid_mass_geometry(shape) -> dict:
+    """Volume/area/centroid and unit-density CG inertia in mm³/mm²/mm/mm⁵.
+
+    The inertia is the physical tensor (negative products off diagonal).
+    """
+    require_closed_solids(shape)
+    sh = _split_at_knots(shape)
+    props, surface = GProp_GProps(), GProp_GProps()
+    BRepGProp.VolumeProperties_s(sh, props)
+    BRepGProp.SurfaceProperties_s(sh, surface)
+    if props.Mass() <= 0:
+        raise GeometryError('Solid volume must be positive')
+    matrix = props.MatrixOfInertia()
+    inertia = np.array([[matrix.Value(i+1, j+1) for j in range(3)] for i in range(3)])
+    return dict(volume=props.Mass(), area=surface.Mass(), centroid=_xyz(props.CentreOfMass()),
+                volume_inertia=inertia)
 
 
 def _split_at_knots(shape):
@@ -711,6 +804,7 @@ class FaceInfo:
     radius: float | None = None       # cylinders / spheres / tori (major)
     axis: np.ndarray | None = None    # cylinder / cone axis direction
     axis_point: np.ndarray | None = None
+    center: np.ndarray | None = None  # analytic sphere centre, not trimmed-face centroid
 
     @property
     def diameter(self) -> float | None:
@@ -760,6 +854,7 @@ def face_infos(shape) -> list[FaceInfo]:
             info.axis_point = _xyz(cone.Axis().Location())
         elif st == GeomAbs_Sphere:
             info.kind, info.radius = "sphere", surf.Sphere().Radius()
+            info.center = _xyz(surf.Sphere().Location())
         elif st == GeomAbs_Torus:
             info.kind, info.radius = "torus", surf.Torus().MajorRadius()
         elif st in (GeomAbs_BSplineSurface, GeomAbs_BezierSurface):

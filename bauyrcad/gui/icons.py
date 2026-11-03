@@ -15,6 +15,22 @@ GREEN = "#2f9e57"
 ORANGE = "#f08a24"
 
 _ICONS = {
+    "properties": '<path d="M4 5h16M4 12h16M4 19h16" stroke="#555" stroke-width="2"/><path d="M8 2v6M16 9v6M10 16v6" stroke="#555" stroke-width="4"/>',
+    "shaded": '<path d="M3 7l9-5 9 5v10l-9 5-9-5z" fill="#aaa" stroke="#444" stroke-width="1.4"/><path d="M3 7l9 5 9-5-9-5z" fill="#ddd"/><path d="M12 12l9-5v10l-9 5z" fill="#777"/>',
+    "shaded_edges": '<path d="M3 7l9-5 9 5v10l-9 5-9-5zM3 7l9 5 9-5M12 12v10" fill="#ccc" stroke="#444" stroke-width="1.4"/>',
+    "check_geometry": '<path d="M3 7l7-4 7 4v9l-7 4-7-4zM3 7l7 4 7-4M10 11v9" fill="#eee" stroke="#444" stroke-width="1.4"/><circle cx="17" cy="17" r="6" fill="#fff" stroke="#444" stroke-width="1.3"/><path d="M14 17l2 2 4-5" fill="none" stroke="#32834d" stroke-width="2"/>',
+    "hide_component": '<path d="M2 12q10-13 20 0-10 13-20 0z" fill="none" stroke="#444" stroke-width="1.5"/><circle cx="12" cy="12" r="3" fill="none" stroke="#444" stroke-width="1.5"/><path d="M3 21L21 3" stroke="#444" stroke-width="2"/>',
+    "show_components": '<path d="M2 12q10-13 20 0-10 13-20 0z" fill="none" stroke="#444" stroke-width="1.5"/><circle cx="12" cy="12" r="3" fill="#666"/>',
+    "isolate_component": '<path d="M2 8V2h6M16 2h6v6M22 16v6h-6M8 22H2v-6" fill="none" stroke="#777" stroke-width="1.5"/><path d="M7 9l5-3 5 3v6l-5 3-5-3zM7 9l5 3 5-3M12 12v6" fill="#ddd" stroke="#333" stroke-width="1.3"/>',
+    'bounds': '<path d="M5 8l7-4 7 4v9l-7 4-7-4zM5 8l7 4 7-4M12 12v9" fill="#f2f2f2" stroke="#353535" stroke-width="1.4"/><path d="M2 5v15M1 5h3M1 20h3M7 2h13M7 1v3M20 1v3" fill="none" stroke="#777" stroke-width="1.2"/>',
+    'mass_properties': '<circle cx="12" cy="5" r="2.5" fill="none" stroke="#353535" stroke-width="1.6"/><path d="M7 8h10l4 13H3z" fill="#e5e5e5" stroke="#353535" stroke-width="1.6"/><path d="M8 17v-5l4 4 4-4v5" fill="none" stroke="#353535" stroke-width="1.4"/>',
+    'interference': '<rect x="2" y="3" width="13" height="12" fill="#eee" stroke="#353535" stroke-width="1.5"/><rect x="9" y="9" width="13" height="12" fill="#ddd" stroke="#353535" stroke-width="1.5"/><path d="M9 9h6v6H9z" fill="#bc4545" stroke="#353535" stroke-width="1.3"/>',
+
+    'view_image': '<path d="M3 7h5l2-3h5l2 3h4v13H3z" fill="#eee" stroke="#353535" stroke-width="1.6"/><circle cx="12" cy="13" r="4" fill="#fff" stroke="#353535" stroke-width="1.5"/><path d="M18 9h1" stroke="#353535" stroke-width="1.6"/>',
+    'copy_view_image': '<path d="M3 16V3h14" fill="none" stroke="#777" stroke-width="1.5"/><rect x="7" y="7" width="14" height="14" fill="#f2f2f2" stroke="#353535" stroke-width="1.5"/><path d="M8 18l4-5 3 3 2-2 3 4" fill="none" stroke="#353535" stroke-width="1.4"/><circle cx="17" cy="11" r="1.3" fill="#777"/>',
+
+    "clearance": '<path d="M2 4h5v16H2zM17 4h5v16h-5z" fill="#e5e5e5" stroke="#353535" stroke-width="1.5"/><path d="M8 12h8M8 12l3-2v4zM16 12l-3-2v4z" fill="#353535" stroke="#353535" stroke-width="1"/>',
+    "section": '<path d="M4 8l8-4 8 4v10l-8 4-8-4z" fill="#eee" stroke="#333" stroke-width="1.5"/><path d="M4 13l8-4 8 4-8 4z" fill="#d4c7a6" stroke="#333" stroke-width="1.3"/><path d="M7 14l6-3m-2 5l6-3" stroke="#555" stroke-width="1"/>',
     "new": f'<path d="M6 3h8l4 4v14H6z" fill="#fff" stroke="{INK}" stroke-width="1.6"/><path d="M14 3v4h4" fill="none" stroke="{INK}" stroke-width="1.6"/>',
     "open": f'<path d="M3 7h6l2 2h10v10H3z" fill="#f7d68a" stroke="{INK}" stroke-width="1.6"/>',
     "save": f'<path d="M4 4h13l3 3v13H4z" fill="#fff" stroke="{INK}" stroke-width="1.6"/><rect x="7" y="4" width="8" height="5" fill="{BLUE}"/><rect x="7" y="13" width="10" height="7" fill="none" stroke="{INK}" stroke-width="1.4"/>',

@@ -160,7 +160,8 @@ class Viewer(QWidget):
         self.plotter = QtInteractor(self, multi_samples=8, line_smoothing=True)
         lay.addWidget(self.plotter.interactor)
         p = self.plotter
-        p.set_background("#fbfcfe", top="#b9c8dc")
+        from .appearance import register_viewer
+        register_viewer(self)
         p.enable_parallel_projection()
         p.add_axes(interactive=False, line_width=2, color="black")
         for key in ("q", "b", "v", "C", "Up", "Down", "plus", "minus", "S"):
@@ -231,6 +232,8 @@ class Viewer(QWidget):
         self._numpad_last = None          # (key, camera frame it produced) for repeat presses
         self.normal_to_provider = None    # callable -> SketchPlane | None (numpad 0)
 
+        from .section_view import SectionDisplay
+        self.section = SectionDisplay(self)
         self.view_isometric(animate=False)
 
     # ------------------------------------------------------------------
@@ -241,6 +244,12 @@ class Viewer(QWidget):
         return self.plotter.renderer
 
     def render(self):
+        from .appearance import sync_model_edges
+        sync_model_edges(self)
+        if hasattr(self, "section"):
+            self.section.sync()
+            if self.section.control is not None:
+                self.section.control.manipulator.update()
         self.plotter.render()
 
     def _event_pos(self):
@@ -299,10 +308,11 @@ class Viewer(QWidget):
         dop = np.array(cam.GetDirectionOfProjection())
         return disp, (pts - np.array(cam.GetPosition())) @ dop
 
-    def pick_topology(self, x, y, vertices=None, tol_px=8.0):
+    def pick_topology(self, x, y, vertices=None, tol_px=8.0, *, kinds=None, tessellation=None, face_lookup=None):
         """Vertex, edge or face under a pixel (for Measure): ("vertex", i, p) |
         ("edge", i, p) | ("face", i, p) | None. Points and edges hidden behind the body are
         not picked; vertices win over edges, edges over faces."""
+        kinds = {'vertex', 'edge', 'face'} if kinds is None else set(kinds)
         info = self.pick(x, y)
         cam = self.renderer.GetActiveCamera()
         dop = np.array(cam.GetDirectionOfProjection())
@@ -311,17 +321,19 @@ class Viewer(QWidget):
         hit_depth = np.inf if info.point is None else float((np.asarray(info.point) - pos) @ dop)
         dtol = 4 * wpp + 1e-6 * max(abs(hit_depth), 1.0) if np.isfinite(hit_depth) else np.inf
         q = np.array([x, y], float)
-        if vertices is not None and len(vertices):
+        if 'vertex' in kinds and vertices is not None and len(vertices):
             disp, depth = self.project(vertices)
             d = np.linalg.norm(disp - q, axis=1)
-            ok = (d < tol_px) & (depth <= hit_depth + dtol)
+            ok = (d < tol_px) & (depth <= hit_depth + dtol) & self.section.contains(vertices)
             if np.any(ok):
                 i = int(np.argmin(np.where(ok, d, np.inf)))
                 return ("vertex", i, np.asarray(vertices[i], float))
-        tess = getattr(self, "_tess", None)
-        if tess is not None and tess.edge_polylines:
+        tess = tessellation if tessellation is not None else getattr(self, "_tess", None)
+        if 'edge' in kinds and tess is not None and tess.edge_polylines:
             best = None
-            for pl, eid in zip(tess.edge_polylines, getattr(tess, "edge_ids", range(len(tess.edge_polylines)))):
+            segments = ((line, eid) for pl, eid in zip(tess.edge_polylines, getattr(tess, "edge_ids", range(len(tess.edge_polylines))))
+                        for line in self.section.lines(pl))
+            for pl, eid in segments:
                 disp, depth = self.project(pl)
                 A, B = disp[:-1], disp[1:]
                 AB = B - A
@@ -336,8 +348,12 @@ class Viewer(QWidget):
                         best = (dd[k], eid, pl[k] + t[k] * (pl[k + 1] - pl[k]))
             if best is not None:
                 return ("edge", int(best[1]), np.asarray(best[2]))
-        if info.kind == "face":
+        if 'face' in kinds and info.kind == "face":
             return ("face", info.face, info.point)
+        if 'face' in kinds and info.kind == 'asm_face' and face_lookup is not None:
+            index = face_lookup.get((info.component, info.face))
+            if index is not None:
+                return ('face', index, info.point)
         return None
 
     def set_overlay(self, name, polylines=(), points=(), color="#ff7a00", width=4.0,
@@ -393,6 +409,12 @@ class Viewer(QWidget):
 
     def _left_down(self, obj, ev):
         self.stop_animation()
+        self._section_drag=False
+        control=self.section.control
+        if control is not None and control.manipulator.press(*self._event_pos()):
+            self._section_drag=True
+            self._press=None
+            return
         self._press = self._event_pos()
         self._moved = False
         if self.mode == "sketch":
@@ -418,6 +440,11 @@ class Viewer(QWidget):
         # Left drag is reserved for selection/editing, never camera rotation.
 
     def _left_up(self, obj, ev):
+        if getattr(self,'_section_drag',False):
+            self._section_drag=False
+            self.section.control.manipulator.release()
+            self._press=None
+            return
         if self.mode == "sketch":
             x, y = self._event_pos()
             uv = self._sketch_uv(x, y)
@@ -465,6 +492,7 @@ class Viewer(QWidget):
         assembly actor transforms and visible result/preview surfaces are respected.
         """
         candidates = [self._body_actor] + [entry[0] for entry in self._asm.values()]
+        candidates += self.section.caps
         candidates += [self.plotter.actors.get(name) for name in ("results", "preview")]
         actors = [a for a in candidates if a is not None and a.GetVisibility()]
         picker = vtk.vtkCellPicker()
@@ -494,6 +522,13 @@ class Viewer(QWidget):
             matrix = actor.GetMatrix()
             transform = np.array([[matrix.GetElement(i, j) for j in range(4)] for i in range(4)])
             world = mesh.points @ transform[:3, :3].T + transform[:3, 3]
+            if self.section.active and (actor is self._body_actor or
+                                        any(actor is entry[0] for entry in self._asm.values())):
+                mesh = pv.PolyData(world, mesh.faces).clip(normal=self.section.plane.GetNormal(),
+                    origin=self.section.plane.GetOrigin(), invert=False).triangulate()
+                if not mesh.n_cells:
+                    continue
+                world = mesh.points
             xy, depth = self.project(world)
             triangles = mesh.faces.reshape(-1, 4)[:, 1:]
             for start in range(0, len(triangles), 4096):
@@ -569,6 +604,9 @@ class Viewer(QWidget):
 
     def _move(self, obj, ev):
         x, y = self._event_pos()
+        if getattr(self,'_section_drag',False):
+            self.section.control.manipulator.move(x,y)
+            return
         if self._press is not None and max(abs(x - self._press[0]), abs(y - self._press[1])) > CLICK_TOLERANCE_PX:
             self._moved = True
         rp = getattr(self, "_rpress", None)
@@ -656,6 +694,8 @@ class Viewer(QWidget):
                 points = self._actor_points(actor, mesh.points)
                 triangles = mesh.faces.reshape(-1, 4)[:, 1:]
                 for face, depth, point in ray_faces(points, triangles, mesh.cell_data["face_id"], start, end):
+                    if not self.section.contains(point):
+                        continue
                     info = PickInfo(kind="asm_face" if cid is not None else "face", face=face,
                                     point=point, display=(x, y), component=cid,
                                     topology=("face", face, point))
@@ -664,7 +704,9 @@ class Viewer(QWidget):
                         and self._body_actor.GetVisibility())
         tolerance = 8 * self.devicePixelRatioF()
         if visible_body and "edge" in kinds and self._tess is not None:
-            for pl, eid in zip(self._tess.edge_polylines, self._tess.edge_ids):
+            segments = ((line, eid) for pl, eid in zip(self._tess.edge_polylines, self._tess.edge_ids)
+                        for line in self.section.lines(pl))
+            for pl, eid in segments:
                 xy, depth = self.project(pl)
                 delta = xy[1:] - xy[:-1]
                 t = np.clip(np.sum((np.array([x, y]) - xy[:-1]) * delta, axis=1)
@@ -681,7 +723,7 @@ class Viewer(QWidget):
         if visible_body and "vertex" in kinds and vertices is not None and len(vertices):
             xy, depth = self.project(vertices)
             distances = np.linalg.norm(xy - (x, y), axis=1)
-            for i in np.flatnonzero((distances < tolerance) & (depth > 0)):
+            for i in np.flatnonzero((distances < tolerance) & (depth > 0) & self.section.contains(vertices)):
                 point = np.asarray(vertices[i])
                 found.append((-1, float(distances[i]), PickInfo(kind="vertex", point=point,
                              display=(x, y), topology=("vertex", int(i), point))))
@@ -772,10 +814,17 @@ class Viewer(QWidget):
             for actor, _, _ in self._asm.values():
                 self.picker.AddPickList(actor)
                 n += 1
+        if self.pick_faces and self.section.active:
+            for cap in self.section.caps:
+                self.picker.AddPickList(cap)
+                n += 1
         if n == 0 or not self.picker.Pick(x, y, 0, self.renderer):
             return info
         actor = self.picker.GetActor()
         info.point = np.array(self.picker.GetPickPosition())
+        if actor in self.section.caps:
+            info.kind = "section_cap"
+            return info
         for cid, (a, mesh, _) in self._asm.items():
             if a is actor:
                 cell = self.picker.GetCellId()
@@ -1097,6 +1146,15 @@ class Viewer(QWidget):
         """{(component id, face index or None for the whole component): rgb}."""
         self._asm_overrides = dict(overrides)
         self._apply_assembly_colors()
+        self.render()
+
+    def set_assembly_opacities(self, overrides=None):
+        """Temporary Evaluate transparency; omitted components return to full opacity."""
+        for cid, (actor, _, edges) in self._asm.items():
+            opacity = float((overrides or {}).get(cid, 1.0))
+            actor.GetProperty().SetOpacity(opacity)
+            if edges is not None:
+                edges.GetProperty().SetOpacity(opacity)
         self.render()
 
     def _apply_assembly_colors(self):
@@ -1556,6 +1614,21 @@ class Viewer(QWidget):
         center, scale = self._fit_params(F, margin=margin)
         animate = animate or self.animating       # joins a running transition (Normal To + fit)
         self.animate_camera(F[:, 2], F[:, 1], center, scale, duration=None if animate else 0)
+
+    def fit_bounds(self, bounds, margin=1.12):
+        """Fit a chosen world-space box without changing camera orientation."""
+        b = np.asarray(bounds, float)
+        if b.shape != (6,) or not np.all(np.isfinite(b)) or np.any(b[::2] > b[1::2]):
+            raise ValueError('Expected finite ordered world bounds')
+        F = self._target_frame()
+        corners = np.array([[x, y, z] for x in b[:2] for y in b[2:4] for z in b[4:]])
+        center = corners.mean(axis=0)
+        rel = corners - center
+        width, height = self.renderer.GetSize()
+        aspect = width / max(height, 1)
+        scale = max(np.abs(rel @ F[:, 1]).max(),
+                    np.abs(rel @ F[:, 0]).max() / max(aspect, 1e-6), 1e-3) * margin
+        self.animate_camera(F[:, 2], F[:, 1], center, scale, duration=0)
 
     def screenshot(self, path: str):
         self.plotter.screenshot(path)

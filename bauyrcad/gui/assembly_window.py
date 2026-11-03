@@ -118,14 +118,37 @@ class AssemblyWindow(QMainWindow):
         self.a_top = v("Top", "top", lambda: self.viewer.view_top(), "Ctrl+2")
         self.a_right = v("Right", "right", lambda: self.viewer.view_right(), "Ctrl+3")
         self.a_fit = v("Zoom to Fit", "fit", lambda: self.viewer.fit())
+        self.a_hide = A("Hide / Show Selected", "hide_component", lambda: self.visibility.toggle(self.selected))
+        self.a_isolate = A("Isolate Selected", "isolate_component",
+            lambda checked: self.visibility.isolate(self.selected) if checked else self.visibility.exit_isolate(), checkable=True)
+        self.a_show_all = A("Show All Components", "show_components", lambda: self.visibility.show_all())
+        self.a_zoom_selected = A("Zoom to Selected", "fit", lambda: self.visibility.zoom(self.selected))
+        self.a_measure = A("Measure", "measure", self.start_measure)
+        self.a_bounds = A("Bounding Box", "bounds", self.show_dimensions)
+        self.a_section = A("Section View", "section", self.show_section)
+        self.a_section.setCheckable(True)
+        self.a_check_geometry = A("Check Geometry", "check_geometry", self.show_geometry_check)
+        from .view_image import export_view, copy_view
+        self.a_view_image = A("Save View Image...", "view_image", lambda: export_view(self))
+        self.a_copy_view = A("Copy View Image", "copy_view_image", lambda: copy_view(self))
+        self.a_mass = A("Mass Properties", "mass_properties", self.show_mass_properties)
+        self.a_clearance = A("Minimum Clearance", "clearance", self.show_clearance)
+        self.a_interference = A("Interference", "interference", self.show_interference)
 
     def _build_ui(self):
         self.a_pack = self._act("Pack and Go", "export", self.pack_and_go, None,
                                "Bundle the assembly, mates and saved part files into a portable ZIP")
+        self.setStyleSheet("""
+            QToolBar { background: #f5f5f5; spacing: 2px; }
+            QToolButton { padding: 3px; }
+            QToolButton:checked { background: #dddddd; border: 1px solid #888888; border-radius: 3px; }
+            QTreeWidget { background: #ffffff; }
+        """)
         mb = self.menuBar()
         m = mb.addMenu("&File")
         for a in (self.a_new, self.a_open, self.a_save, self.a_save_as, None, self.a_insert,
-                  self.a_export, self.a_export_sw, self.a_pack, self.a_drawing, self.a_reload):
+                  self.a_export, self.a_export_sw, self.a_pack, self.a_drawing, self.a_reload, None,
+                  self.a_view_image, self.a_copy_view):
             m.addSeparator() if a is None else m.addAction(a)
         m = mb.addMenu("&Edit")
         for a in (self.a_undo, self.a_redo, None, self.a_delete):
@@ -134,19 +157,47 @@ class AssemblyWindow(QMainWindow):
         for a in (self.a_insert, self.a_mate, self.a_fix, self.a_open_part, self.a_animate):
             m.addAction(a)
         m = mb.addMenu("&View")
-        for a in (self.a_front, self.a_top, self.a_right, self.a_iso, self.a_fit):
+        from .appearance import add_menu
+        self.background_actions = add_menu(self, m)
+        from .appearance import add_display_menu
+        self.display_actions = add_display_menu(self, m)
+        for a in (self.a_front, self.a_top, self.a_right, self.a_iso, self.a_fit, self.a_section,
+                  self.a_view_image, self.a_copy_view):
             m.addAction(a)
 
+        m.addSeparator()
+        for action in (self.a_hide, self.a_isolate, self.a_show_all, self.a_zoom_selected):
+            m.addAction(action)
         tb = QToolBar()
         tb.setIconSize(QSize(28, 28))
         tb.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        for a in (self.a_new, self.a_open, self.a_save, None, self.a_insert, self.a_mate,
-                  self.a_fix, self.a_delete, self.a_animate, None, self.a_open_part,
-                  self.a_reload, self.a_export, self.a_export_sw, self.a_pack, self.a_drawing, None, self.a_undo,
-                  self.a_redo, None,
-                  self.a_front, self.a_top, self.a_right, self.a_iso, self.a_fit):
+        for a in (self.a_insert, self.a_mate, self.a_fix, self.a_delete, self.a_animate,
+                  None, self.a_open_part, self.a_reload, None, self.a_export,
+                  self.a_export_sw, self.a_pack, self.a_drawing):
             tb.addSeparator() if a is None else tb.addAction(a)
-        self.addToolBar(tb)
+        self.assembly_toolbar=tb
+        self.view_toolbar = QToolBar('View', self)
+        self.view_toolbar.setIconSize(QSize(28, 28))
+        self.view_toolbar.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        for action in (self.a_front, self.a_top, self.a_right, self.a_iso, self.a_fit, self.a_section):
+            self.view_toolbar.addAction(action)
+
+        evaluate = mb.addMenu("&Evaluate")
+        evaluate.addAction(self.a_measure)
+        evaluate.addAction(self.a_bounds)
+        evaluate.addAction(self.a_mass)
+        evaluate.addAction(self.a_check_geometry)
+        evaluate.addAction(self.a_interference)
+        evaluate.addAction(self.a_clearance)
+        evaluate_bar = self.evaluate_toolbar = QToolBar('Evaluate', self)
+        evaluate_bar.setIconSize(QSize(28, 28))
+        evaluate_bar.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        evaluate_bar.addAction(self.a_measure)
+        evaluate_bar.addAction(self.a_bounds)
+        evaluate_bar.addAction(self.a_mass)
+        evaluate_bar.addAction(self.a_interference)
+        evaluate_bar.addAction(self.a_clearance)
+        evaluate_bar.addAction(self.a_check_geometry)
 
         split = QSplitter(Qt.Horizontal)
         self.left = QStackedWidget()
@@ -160,12 +211,26 @@ class AssemblyWindow(QMainWindow):
         self.tree.itemDoubleClicked.connect(self._tree_double_click)
         self.left.addWidget(self.tree)
         self.left.addWidget(self._build_mate_panel())
-        split.addWidget(self.left)
+        from .workspace_layout import manager, viewport_tools
+        split.addWidget(manager(self))
         self.viewer = Viewer()
+        from .component_visibility import ComponentVisibility
+        self.visibility = ComponentVisibility(self)
+        viewport_tools(self)
         split.addWidget(self.viewer)
         split.setStretchFactor(1, 1)
         split.setSizes([340, 1160])
-        self.setCentralWidget(split)
+        from PySide6.QtWidgets import QTabWidget
+        central=QWidget(); layout=QVBoxLayout(central); layout.setContentsMargins(0,0,0,0); layout.setSpacing(0)
+        quick=QToolBar(); quick.setIconSize(QSize(20,20))
+        for action in (self.a_new,self.a_open,self.a_save,self.a_undo,self.a_redo): quick.addAction(action)
+        layout.addWidget(quick)
+        self.tabs=QTabWidget(); self.tabs.setDocumentMode(True); self.tabs.setTabPosition(QTabWidget.South)
+        for toolbar,label in ((self.assembly_toolbar,'Assembly'),(self.evaluate_toolbar,'Evaluate'),(self.view_toolbar,'View')):
+            self.tabs.addTab(toolbar,label)
+        self.tabs.setMaximumHeight(104)
+        layout.addWidget(self.tabs); layout.addWidget(split,1)
+        self.setCentralWidget(central)
         self.status_label = QLabel()
         self.statusBar().addWidget(self.status_label, 1)
         self.status_label.setText(self.MOUSE_HINT)
@@ -235,6 +300,20 @@ class AssemblyWindow(QMainWindow):
         R("SAVE", "Save", self.file_save, ("QSAVE",), "save")
         R("EXPORT", "Export", self.file_export, ("EXP",), "export")
         R("PACKANDGO", "Pack and Go", self.pack_and_go, ("PACK",), "export")
+        R("SECTION", "Section View", self.show_section, ("SEC",), "section")
+        R("CHECKGEOMETRY", "Check Geometry", self.show_geometry_check, ("CHECK",), "check_geometry")
+        R("HIDE", "Hide / Show Selected", lambda: self.visibility.toggle(self.selected), (), "hide_component")
+        R("ISOLATE", "Isolate Selected", lambda: self.visibility.isolate(self.selected), (), "isolate_component")
+        R("SHOWALL", "Show All Components", self.visibility.show_all, (), "show_components")
+        R("ZOOMSELECTED", "Zoom to Selected", lambda: self.visibility.zoom(self.selected), ("ZS",), "fit")
+        from .view_image import export_view, copy_view
+        R("VIEWIMAGE", "Save View Image", lambda: export_view(self), (), "view_image")
+        R("COPYVIEW", "Copy View Image", lambda: copy_view(self), (), "copy_view_image")
+        R("MEASURE", "Measure", self.start_measure, ("MEA", "DIST", "EVALUATE"), "measure")
+        R("BOUNDINGBOX", "Bounding Box", self.show_dimensions, ("BBOX",), "bounds")
+        R("MASSPROP", "Mass Properties", self.show_mass_properties, ("MASS",), "mass_properties")
+        R("CLEARANCE", "Minimum Clearance", self.show_clearance, ("GAP",), "clearance")
+        R("INTERFERENCE", "Interference Detection", self.show_interference, ("INTERFERE",), "interference")
         R("DRAWING", "Make drawing", self.make_drawing, ("DRW", "MAKEDRAWING"), "drawing")
         R("SOLIDWORKS", "Export to SolidWorks", self.export_solidworks, ("SW", "SLDASM"), "solidworks")
         R("UNDO", "Undo", self.undo, ("U",), "undo")
@@ -308,12 +387,23 @@ class AssemblyWindow(QMainWindow):
 
     def refresh(self, fit=False, animate=False):
         """Rebuild the view. animate=True glides components from where they were shown."""
+        if getattr(self, 'measure_win', None) is not None:
+            self.measure_win.model_changed()
+        if getattr(self, 'mass_win', None) is not None:
+            self.mass_win.model_changed()
+        if getattr(self, 'geometry_check_win', None) is not None:
+            self.geometry_check_win.model_changed()
+        if getattr(self, 'interference_win', None) is not None:
+            self.interference_win.model_changed()
+        if getattr(self, 'clearance_win', None) is not None:
+            self.clearance_win.model_changed()
         items = [(c.id, c.tessellation, c.pose.matrix, c.color or (176, 186, 200))
                  for c in self.asm.components if c.shape is not None]
         if self._anim is not None:
             self._finish_animation(apply=False)
         before = dict(self._shown)
         self.viewer.set_assembly(items)
+        self.visibility.apply()
         self._shown = {c.id: c.pose.copy() for c in self.asm.components}
         if animate:
             for cid, pose in before.items():
@@ -332,6 +422,16 @@ class AssemblyWindow(QMainWindow):
 
     def update_poses(self):
         """Show the current poses immediately (dragging)."""
+        if getattr(self, 'measure_win', None) is not None:
+            self.measure_win.model_changed()
+        if getattr(self, 'mass_win', None) is not None:
+            self.mass_win.model_changed()
+        if getattr(self, 'geometry_check_win', None) is not None:
+            self.geometry_check_win.model_changed()
+        if getattr(self, 'interference_win', None) is not None:
+            self.interference_win.model_changed()
+        if getattr(self, 'clearance_win', None) is not None:
+            self.clearance_win.model_changed()
         self._anim_timer.stop()
         self._anim = None
         for c in self.asm.components:
@@ -456,6 +556,7 @@ class AssemblyWindow(QMainWindow):
         root.setExpanded(True)
         mates.setExpanded(True)
         self.tree.blockSignals(False)
+        self.visibility.decorate_tree()
 
     # =====================================================================================
     # selection and tree
@@ -481,6 +582,19 @@ class AssemblyWindow(QMainWindow):
         self._update_colors()
 
     def _clicked(self, info):
+        section = getattr(self, 'section_win', None)
+        if section is not None and section.consume_pick(info):
+            return
+        mw = getattr(self, 'measure_win', None)
+        if mw is not None and mw.isVisible():
+            hit = None
+            if info.topology is not None and info.kind == 'asm_face':
+                _ = mw.body
+                index = mw.face_lookup.get((info.component, info.face))
+                if index is not None:
+                    hit = ('face', index, info.point)
+            mw.pick(*info.display, hit=hit)
+            return
         if info.kind != "asm_face":
             if not self.mate_panel:
                 self.selected = None
@@ -498,6 +612,10 @@ class AssemblyWindow(QMainWindow):
 
     def _right_clicked(self, info):
         names = {c.id: c.name for c in self.asm.components}
+        mw = getattr(self, 'measure_win', None)
+        if mw is not None and mw.isVisible():
+            self.viewer.select_other(info.display, names=names)
+            return
         if self.mate_panel:
             self.viewer.select_other(info.display, names=names)
             return
@@ -518,6 +636,13 @@ class AssemblyWindow(QMainWindow):
         menu.addAction(icon("fixed"), "Float" if comp.fixed else "Fix", self.toggle_fixed)
         menu.addAction(icon("part"), "Open Part", self.open_part)
         menu.addAction(icon("mate"), "Mate...", self.start_mate)
+        menu.addSeparator()
+        menu.addAction(icon("hide_component"), "Hide" if self.visibility.visible(cid) else "Show",
+                       lambda: self.visibility.toggle(cid))
+        menu.addAction(icon("isolate_component"), "Exit Isolate" if self.visibility.isolated == cid else "Isolate",
+                       lambda: self.visibility.isolate(cid))
+        menu.addAction(icon("fit"), "Zoom to Selected", lambda: self.visibility.zoom(cid))
+        menu.addAction(self.a_show_all)
         menu.addSeparator()
         menu.addAction(icon("delete"), "Delete", self.delete_selected)
         return menu
@@ -646,6 +771,9 @@ class AssemblyWindow(QMainWindow):
     # =====================================================================================
     def press(self, info, x, y, button="left") -> bool:
         """Left-drag moves a component (orientation kept), right-drag rotates it."""
+        mw = getattr(self, 'measure_win', None)
+        if mw is not None and mw.isVisible():
+            return False
         if self.mate_panel or info.kind != "asm_face":
             return False
         self._finish_animation()
@@ -702,6 +830,15 @@ class AssemblyWindow(QMainWindow):
     # mates
     # =====================================================================================
     def start_mate(self):
+        cw = getattr(self, 'clearance_win', None)
+        if cw is not None:
+            cw.close()
+        iw = getattr(self, 'interference_win', None)
+        if iw is not None:
+            iw.close()
+        mw = getattr(self, 'measure_win', None)
+        if mw is not None:
+            mw.close()
         if len(self.asm.components) < 2:
             QMessageBox.information(self, "Mate", "Insert at least two components first.")
             return
@@ -722,6 +859,26 @@ class AssemblyWindow(QMainWindow):
         self.refresh(animate=True)
 
     def _escape(self):
+        check = getattr(self, 'geometry_check_win', None)
+        if check is not None and check.isVisible():
+            check.close()
+            return
+        cw = getattr(self, 'clearance_win', None)
+        if cw is not None and cw.isVisible():
+            cw.close()
+            return
+        iw = getattr(self, 'interference_win', None)
+        if iw is not None and iw.isVisible():
+            iw.close()
+            return
+        mw = getattr(self, 'measure_win', None)
+        if mw is not None and mw.isVisible():
+            mw.close()
+            return
+        sw = getattr(self, 'section_win', None)
+        if not self.mate_panel and sw is not None and sw.isVisible():
+            sw.close()
+            return
         if self.mate_panel:
             if self.picks:
                 self._clear_picks()
@@ -731,6 +888,102 @@ class AssemblyWindow(QMainWindow):
             self.selected = None
             self.tree.clearSelection()
             self._update_colors()
+
+    def start_measure(self):
+        cw = getattr(self, 'clearance_win', None)
+        if cw is not None:
+            cw.close()
+        from .measure_window import MeasureWindow
+        iw = getattr(self, 'interference_win', None)
+        if iw is not None:
+            iw.close()
+        if self.mate_panel:
+            self.close_mate_panel()
+        self._finish_animation()
+        if getattr(self, 'measure_win', None) is None:
+            self.measure_win = MeasureWindow(self)
+        self.measure_win.model_changed()
+        self.measure_win.open()
+        self.status('Measure: select faces, edges or vertices across components (Esc to close)')
+        return self.measure_win
+
+    def show_dimensions(self):
+        self.start_measure().show_dimensions()
+
+    def show_section(self, checked=None):
+        if checked is False:
+            if getattr(self, "section_win", None) is not None:
+                self.section_win.close()
+            return
+        if getattr(self, 'command', None) is not None:
+            self.status('Finish the current command before editing Section View')
+            self.a_section.setChecked(self.viewer.section.plane is not None)
+            return
+        if getattr(self, 'mate_panel', False):
+            self.close_mate_panel()
+        self.a_section.setChecked(True)
+        from .section_view import SectionWindow
+        if getattr(self, "section_win", None) is None:
+            self.section_win = SectionWindow(self)
+        self.section_win.open()
+        return self.section_win
+
+    def show_geometry_check(self):
+        if getattr(self, 'command', None) is not None:
+            self.status('Finish the current command before checking geometry')
+            return
+        if getattr(self, 'mate_panel', False):
+            self.close_mate_panel()
+        if hasattr(self, '_finish_animation'):
+            self._finish_animation()
+        from .geometry_check_window import GeometryCheckWindow
+        if getattr(self, 'geometry_check_win', None) is None:
+            self.geometry_check_win = GeometryCheckWindow(self)
+        self.geometry_check_win.open()
+        return self.geometry_check_win
+
+    def show_mass_properties(self):
+        from .mass_properties_window import MassPropertiesWindow
+        if self.mate_panel:
+            self.close_mate_panel()
+        self._finish_animation()
+        if getattr(self, 'mass_win', None) is None:
+            self.mass_win = MassPropertiesWindow(self)
+        self.mass_win.open()
+        return self.mass_win
+
+    def show_clearance(self):
+        from .clearance_window import ClearanceWindow
+        if self.mate_panel:
+            self.close_mate_panel()
+        for name in ('measure_win', 'interference_win'):
+            window = getattr(self, name, None)
+            if window is not None:
+                window.close()
+        self._finish_animation()
+        if getattr(self, 'clearance_win', None) is None:
+            self.clearance_win = ClearanceWindow(self)
+        self.clearance_win.open()
+        index = self.clearance_win.first.findData(self.selected)
+        if index >= 0:
+            self.clearance_win.first.setCurrentIndex(index)
+        return self.clearance_win
+
+    def show_interference(self):
+        cw = getattr(self, 'clearance_win', None)
+        if cw is not None:
+            cw.close()
+        from .interference_window import InterferenceWindow
+        if self.mate_panel:
+            self.close_mate_panel()
+        mw = getattr(self, 'measure_win', None)
+        if mw is not None:
+            mw.close()
+        self._finish_animation()
+        if getattr(self, 'interference_win', None) is None:
+            self.interference_win = InterferenceWindow(self)
+        self.interference_win.open()
+        return self.interference_win
 
     def _add_pick(self, cid, face):
         comp = self.asm.component(cid)
@@ -924,7 +1177,11 @@ class AssemblyWindow(QMainWindow):
         if self.mate_panel:
             self.close_mate_panel()
         if self._confirm_discard():
+            if getattr(self, 'section_win', None) is not None:
+                self.section_win.close()
             self.asm = Assembly()
+            self.visibility.hidden.clear()
+            self.visibility.isolated = None
             self.dirty = False
             self._undo.clear()
             self._redo.clear()
@@ -954,6 +1211,10 @@ class AssemblyWindow(QMainWindow):
         self.dirty = False
         self._undo.clear()
         self._redo.clear()
+        if getattr(self, 'section_win', None) is not None:
+            self.section_win.close()
+        self.visibility.hidden.clear()
+        self.visibility.isolated = None
         self.refresh(fit=True)
         self._report_missing()
 

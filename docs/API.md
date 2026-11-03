@@ -88,7 +88,12 @@ Edges for fillet / chamfer can be given as points near them (`(x, y, z)` tuples)
 (a list of ints), or `edges_where()` items. Features remember their edges and faces by
 geometry, so they follow edits of earlier features (change a depth and the fillets, holes
 and shells rebuild).
-| `part.measure(*items)` | SolidWorks Measure: faces (`part.face(...)`), edges (`("edge", i)`), vertices (`("vertex", i)` or a 3D point). Returns sizes and, for two items, `distance`, `delta`, `center_distance`, `axis_distance`, `normal_distance`, `angle`; `text` = the report lines |
+| `part.measure(*items, mode="minimum", unit="mm", decimals=4)` | Evaluate faces (`part.face(...)`), edges (`("edge", i)`), vertices (`("vertex", i)` or nearest vertex to a bare XYZ tuple), or exact points (`("point", (x,y,z))`). Returns sizes, minimum `distance`/`delta`, applicable centre/axis/normal distances and angles; `measurement`/`measurement_delta` follow the selected mode; `text` contains the formatted report. Three points measure the angle at the second point. Numeric values remain mm/mm²/degrees; display units: mm, cm, m, in. |
+| `part.dimensions()` | Tight world-axis bounding box: `minimum`, `maximum`, `size` (XYZ arrays), and `diagonal`, all in mm. This is not a minimum-volume oriented box. |
+| `part.set_material(name=None, density=None)` | Save a physical material for mass properties: library name or custom density in kg/m³. No arguments clears it. Independent of study materials. |
+| `part.mass_properties()` | Volume (mm³), area (mm²), volume centroid (mm), mass (kg), CG (mm), inertia about CG/world origin (kg mm²), principal moments and unit principal axes (columns, ascending moments). Physical tensor off-diagonals are negative products of inertia. Missing density gives `mass=None` and no CG/inertia. |
+| `component.set_material(name=None, density=None)` | Save a physical-material override for this assembly instance. No arguments restores the source-part assignment; source files are unchanged. |
+| `assembly.mass_properties()` | World-coordinate totals with per-instance density/rotation and parallel-axis shifts. Includes `components` and `missing_density` details. Any unassigned density withholds total mass/CG/inertia; missing geometry raises an error. |
 | `part.vertex(near)` | model vertex nearest to a point, e.g. for point loads |
 | `part.volume()`, `part.bbox()`, `part.info()` | queries (`info` = features, faces with index/normal/centroid/area, studies) |
 | `part.render(png, view="iso", study=None)` | picture. Views: `iso iso2 iso_back iso_below front back top bottom right left` |
@@ -209,6 +214,7 @@ asm.render("hinge.png"); asm.save("hinge.bcasm"); asm.export("hinge.step")
 | `asm.clearance(a, b=None)` | minimum distance [mm] between two components, or from `a` to the nearest other one: `{a, b, distance, point_a, point_b, overlap}` (distance 0 = touching or overlapping; `overlap` [mm3] > 0 = interference) |
 | `asm.clearance_sweep(a, b=None, keyframes=[...], frames=12)` or `(..., poses=asm.motion(...))` | the smallest clearance over a motion study, with the frame where it happens and `distances` per frame (e.g. gripper vs. robot wrist over J5/J6 sweeps) |
 | `asm.interference(min_volume=1e-3, ignore=[(a, b)])` | overlapping components at the current pose `[{a, b, volume}]`; touching faces (a shaft in a same-size bore) are not interference. Call it at each keyframe of a motion |
+| `asm.check_interference(min_volume=1e-3, ignore=[(a, b)])` | Complete current-pose check: returns `overlaps` (component names and mm³), `component_count`, `min_volume`, `ignored_pairs`, and `pair_volume_sum`. Raises for missing/invalid/open geometry or failed intersections. Unlike the legacy helper, missing components are never silently skipped. |
 | `asm.render(png, view="iso")`, `asm.save(path)`, `asm.export(path, fmt=None)` | picture, `.bcasm` (paths stored relative to it), export. **STEP and Parasolid `.x_t` keep the assembly structure** (each part file once, placed instances, names and colours), so SolidWorks opens it as an assembly; `.x_t` is written by BauyrCAD itself (no SolidWorks needed) and keeps the colours exactly; IGES/STL/... get one compound |
 | `asm.export("a.SLDASM")` | a SolidWorks 2024 assembly written by BauyrCAD itself (no SolidWorks needed): each part once as `<part>.SLDPRT` next to it (exact solid as an Imported body, like `part.export(".SLDPRT")`), one component per BauyrCAD component named `<part>-1`, `<part>-2`... (a part used twice is shared), placed exactly and fixed / floating as here. No mates and no colours yet (use `asm.export_solidworks` with SolidWorks for mates). Up to 46 components (`swfile.max_components()`; larger assemblies: STEP or `.x_t`). Keep the folder together: SolidWorks finds the parts next to the assembly |
 | `bauyrcad.api.export_solidworks_tree("top.SLDASM", [(child, pose, fixed), ...])` | a SolidWorks 2024 assembly **of sub-assemblies**, written without SolidWorks: each child `Assembly` (or `.bcasm` path) is written as `<its name>.SLDASM` with its parts next to the top, and the top references it as a sub-assembly component (children may also be parts: a saved `Part`, `.bcad` or STEP path). `pose` = 4x4 matrix in mm (None = identity). Up to 46 components per level, so large machines go in as a tree. No mates and no colours (as above). Returns the files written |
@@ -867,3 +873,223 @@ The writer does not run SolidWorks. Its bundled templates were made once in Soli
 editing a dimension, and saving/reopening in a private SolidWorks session. Unsupported
 features such as shells, patterns, standalone sketches, arbitrary constraints and
 nonstandard planes remain whole-part solid fallbacks rather than partial native trees.
+
+### Evaluate in the desktop app
+
+For parts, open **Evaluate > Measure** on the command tabs (also **Tools > Evaluate**).
+Assemblies have an **Evaluate** menu and Measure toolbar button. Commands: `MEA`, `DIST`
+or `EVALUATE`; `BBOX` opens overall dimensions. Select faces, edges or vertices to inspect
+areas, lengths, radii and diameters; select two for distances and applicable angles. XYZ
+differences use the world axes. Use the selection filter to avoid accidentally selecting
+an edge when you want its face. **Point on surface** projects a clicked viewport point onto
+the exact CAD face; three points give the angle at the second point.
+
+**Minimum** measures the selected finite geometry. **Centre / axis** uses point/circle/sphere
+centres or the closest points on two infinite cylindrical/conical axes. **Maximum** is exact
+for points and full circular edges in parallel planes; trimmed arcs, skew circles and
+arbitrary faces are explicitly rejected. These are measurement tools, not the entire
+SolidWorks Evaluate analysis suite.
+
+Set mm/cm/m/in and 0–8 decimals, copy the report, or keep a snapshot in session history.
+Snapshots retain their original units and are labelled as not live. Live selections clear
+when the model or component poses change. Bounding Box displays world-axis XYZ extents
+and the diagonal; measurement does not modify the model or add driving sketch dimensions.
+
+### Physical mass properties
+
+Open **Evaluate > Mass Properties** (command `MASSPROP` or `MASS`). Choose a physical
+material or enter a positive custom density in kg/m³, then **Apply materials**. Assignments
+are undoable and are saved with the part/assembly. They do not change any FEA study material.
+Assembly rows inherit each source part's assignment unless an instance override is applied;
+reload source parts after editing their assignments externally.
+
+The report includes volume, total surface area, mass, CG, the complete inertia tensor about
+the CG and world origin, and principal moments/axes. Coordinates are world XYZ, lengths mm,
+mass kg, and inertia kg mm² (multiply by 1e-6 for kg m²). The viewport can show a CG marker.
+Principal-axis directions are not unique for equal principal moments.
+
+Geometry properties are available without density. Mass, CG and inertia remain unavailable
+until every included component has a density. Unavailable component geometry and open surface
+bodies are errors. Assembly properties sum separate instances: intersecting components are
+counted independently, and surface area includes mating/contact faces. Solid integration is
+numerical on freeform surfaces. This is not an assembly interference or overlap-removal tool.
+
+```python
+part.set_material('Aluminium 6061-T6')
+print(part.mass_properties()['mass'])           # kg
+component.set_material('Custom alloy', density=4500)
+props = assembly.mass_properties()
+print(props['center_of_gravity'])               # world XYZ, mm
+print(props['inertia'])                         # CG tensor in world XYZ, kg mm²
+```
+
+### Assembly interference detection
+
+Open **Evaluate > Interference** or type `INTERFERENCE` / `INTERFERE`. Calculate checks all
+loaded components at their current poses. Select a result row to show its actual intersecting
+solid in red through transparent components. Close or move/rebuild the assembly to clear the
+highlight and invalidate the result; calculate again after a change.
+
+The default minimum overlap is 0.001 mm³. Only volumes strictly above the chosen threshold
+are reported; coincident touching faces are not interference. **Ignore selected pair** excludes
+an intentional fit from the current check. **Reset ignored pairs** restores it; changing the
+assembly or closing the window also clears exclusions. The report states the excluded count,
+and Copy report names the ignored pairs. Pairwise volume sums can count a triple intersection
+multiple times and are not a union volume or a mass correction.
+
+Missing component geometry, open/invalid solids, and failed Boolean intersections produce an
+incomplete check. Cancellation is checked between intersection operations; a single operation
+must finish before cancellation is handled. The tool checks the current pose, not the swept
+motion path. It does not modify parts, mates, or mass properties.
+
+### Section View (desktop)
+
+Open **View > Section View** or type `SECTION` / `SEC` in a part or assembly. Choose
+Front (XY), Top (XZ), or Right (YZ), then drag the position slider or enter the absolute
+world-axis position in mm. **Centre on model** places the plane halfway through the current
+visible model bounds. **Flip direction** keeps the other side; **Show section caps** fills
+the cut while preserving holes. Close the window to restore the full model.
+
+This is a tessellated display section, not a cut feature: saved geometry, mass properties,
+analysis and exports are unchanged. Original retained faces, edges and vertices remain
+selectable. Caps are visual only and cannot be selected as model faces for features or
+measurements. Sectioning temporarily pauses in sketch edit and analysis-results views.
+The plane stays at its world position when components move; caps update with their poses.
+
+### Minimum component clearance
+
+In an assembly, open **Evaluate > Minimum Clearance** (`CLEARANCE` / `GAP`). Choose
+Component A and either Component B or **Nearest other component**, enter the required gap
+in mm, then Calculate. The report shows the exact minimum distance, closest world points,
+and overlap volume. The viewport highlights the pair and the distance between the points.
+The transparency toggle reveals closest points behind component surfaces; closing the tool
+or invalidating the result restores normal opacity.
+Zero distance can mean contact or overlap; the overlap volume distinguishes them. A component
+fully inside another is interference, not a positive gap. Equally close neighbours may exist;
+the nearest-neighbour result names one of them and is not an all-pairs interference report.
+
+Changing inputs or component positions clears the old result. Checks require all requested
+components to have valid closed solids, including distant candidates in a nearest-neighbour
+check. Missing/invalid geometry or kernel failures produce **Check incomplete**. Cancellation
+is handled between geometry operations. This checks the current pose, not a swept motion path.
+
+`assembly.clearance(a, b=None)` returns the same complete check by component name:
+`distance` (mm), `point_a`/`point_b` (world mm), and `overlap` (mm³). Passing the same component
+twice raises an error. In nearest-neighbour mode, unavailable components now raise an error
+instead of being silently omitted. The existing `clearance_sweep` motion helper is separate.
+
+
+### Viewport images (desktop)
+
+Use **File / View > Save View Image** (`VIEWIMAGE`) in a part or assembly to save a PNG
+at 1×, 2× or 3× the viewport resolution. Choose white (default), current-view or transparent
+background. The image includes visible geometry, section caps and inspection labels, but
+excludes toolbars and floating controls. Display settings and the model remain unchanged.
+**Copy View Image** (`COPYVIEW`) copies the current viewport at 1× resolution to the clipboard.
+Transparent output preserves alpha; use PNG when pasting into applications that discard it.
+
+
+### Mass report units and principal axes
+
+The Mass Properties window can display lengths in mm/cm/m/in and mass in kg/g/t/lb,
+with 3–12 significant digits. Area, volume and inertia units follow those choices;
+material density assignments remain in kg/m³. Changing report units does not recalculate
+the geometry or change saved values. Copy report uses the displayed units.
+
+**Show principal axes** draws I1 (red), I2 (green) and I3 (blue) through the centre of
+gravity, ordered by increasing principal moment. Line lengths are for visibility, not
+inertia magnitudes. Equal principal moments have non-unique axis directions. These are
+inspection overlays, not reference geometry; closing the window removes them.
+
+The public `part.mass_properties()` / `assembly.mass_properties()` dictionaries continue
+to use mm, kg and kg mm². For a formatted report:
+
+```python
+from bauyrcad.core.mass_properties import report
+print(report(part.mass_properties(), length_unit='cm', mass_unit='g', precision=6))
+```
+
+
+### Inspection display preferences
+
+**View > Viewport Background** offers White (default), Neutral grey and Classic blue.
+The choice is saved on this computer and updates all open part/assembly windows. It does
+not change model colours. Image export can independently use white or transparent output.
+
+Section View is a checked toggle: click it again, close its controls, or press Escape to
+restore the full display. An active modelling/measurement command receives Escape first.
+Cursor-centred orbit uses the section cap or retained surfaces, including beside the silhouette.
+
+
+### Assembly Hide / Show / Isolate
+
+Right-click a component in the tree or viewport for **Hide / Show**, **Isolate** and
+**Zoom to Selected**. View also offers these commands and **Show All Components**.
+Command aliases: `HIDE`, `ISOLATE`, `SHOWALL`, `ZOOMSELECTED` / `ZS`.
+
+Isolate temporarily shows one component; exiting restores the previous hidden set.
+Hidden components appear grey and italic in the tree. Zoom to Selected reveals the selected
+component if needed. Visibility survives a display rebuild, but resets when opening/newing
+an assembly. It is not saved in the assembly file.
+
+Picking, Measure and Bounding Box use visible components. A visible component with unavailable
+geometry makes Bounding Box incomplete. Section View remains a display cut; it does not change
+the exact component geometry used for measurement. Mass Properties, interference, clearance,
+exports and mates continue to include hidden components. Hide is not suppression.
+
+
+### Sectioning on reference planes and faces
+
+Section View lists built, unsuppressed reference planes in the part or assembly components.
+Choose one to cut on that plane; **Offset from plane** moves the cut along its positive
+normal. Standard planes retain their absolute world-axis Position field. Centre on model
+and the slider use the model's projected bounds along the chosen normal.
+
+**Pick planar face** lets you click an original planar model face. Curved faces and section
+caps are rejected. The face plane starts at zero offset; use the offset/slider to move inside
+the model. Flip changes the retained side without reversing the offset direction.
+
+These choices capture the plane in world coordinates at the time of selection. They do not
+track later geometry/pose changes; reopen Section View or pick the face again after such
+changes. This is a viewing aid, not an associative reference feature.
+
+
+### Check Geometry
+
+Open **Evaluate > Check Geometry** (under Tools in the part menu), or type `CHECKGEOMETRY`
+/ `CHECK`. The check reports OpenCASCADE validity, closed solid suitability, topology counts
+and solid volume. Surfaces without solids, loose topology and non-positive solid orientation
+are flagged. It does not repair or change geometry.
+
+Every assembly component is checked, including hidden components. Missing/load-failed geometry,
+failed features and failed kernel queries produce an incomplete report. Model changes clear
+old results. Cancellation is handled between component checks, after the current kernel query.
+This does not replace interference, wall-thickness or manufacturing checks.
+
+`part.check_geometry()` returns `complete`, `valid`, `closed_solid`, topology counts,
+`volume` (mm³ when suitable) and `issues`. `assembly.check_geometry()` returns `complete`,
+`ok`, per-instance `components` reports and `issues`. Use both `complete` and `closed_solid`
+for a part, or `ok` for an assembly; `valid` alone can also describe an open surface.
+
+
+### Shaded display styles
+
+**View > Display Style** switches between Shaded with Edges (default) and Shaded. The
+preference is saved on this computer and updates open part/assembly views. It affects
+model edge outlines, not the geometry or selection topology. Hidden components remain
+hidden, sections retain their caps, and analysis-result mesh/undeformed outlines keep
+their separate controls. Viewport image export captures the chosen style.
+
+
+### Interactive Section View and CAD workspace
+
+Section View now uses the left PropertyManager with a move arrow and two rotation rings.
+Numeric X/Y rotation and offset controls update the same display-only plane. Keep Section
+returns to the FeatureManager while preserving the cut; the PropertyManager tab reopens it.
+Viewport image exports omit the editing handles. See [the inspection guide](EVALUATE.md).
+Part and assembly windows share manager tabs and a compact view toolbar; assembly commands
+are grouped into Assembly, Evaluate and View tabs. Existing commands and shortcuts remain.
+
+Line/Centerline drawing commits once on each press in a continuing chain. Releasing after
+small mouse movement does not create another endpoint. Dragging from the first point still
+draws one line. This changes GUI input only; sketch scripting APIs are unchanged.

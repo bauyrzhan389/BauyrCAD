@@ -1058,10 +1058,13 @@ class Part:
             raise ApiError("The part has no edges")
         return int(best)
 
-    def measure(self, *items) -> dict:
+    def measure(self, *items, mode='minimum', unit='mm', decimals=4) -> dict:
         """SolidWorks-style Measure of faces (from face()/faces_where()), edges
-        (("edge", i) or part.edge(near=...)) and vertices (("vertex", i) or a 3D point).
-        Returns the measure dict plus "text": the lines the Measure window shows."""
+        (("edge", i)) and vertices (("vertex", i) or the vertex nearest a bare XYZ tuple).
+        Use ("point", (x, y, z)) for exact coordinates. Modes: minimum, center, maximum
+        (points/full circles in parallel planes only). Numeric results stay in mm/mm²;
+        unit and decimals format "text". Three points give the angle at the second point.
+        """
         from .core import measure as _measure
         self._ensure_built()
         refs = []
@@ -1073,9 +1076,39 @@ class Part:
             else:
                 vs = geometry.vertices(self.doc.body)
                 refs.append(("vertex", int(np.argmin(np.linalg.norm(vs - np.asarray(it, float), axis=1)))))
-        r = _measure.measure(self.doc.body, refs)
-        r["text"] = _measure.report(r)
+        r = _measure.measure(self.doc.body, refs, mode=mode)
+        r["text"] = _measure.report(r, unit=unit, decimals=decimals)
         return r
+
+    def check_geometry(self):
+        """Read-only kernel validity/closed-solid report, including failed features."""
+        from .core.geometry_check import part
+        try:
+            self._ensure_built()
+        except ApiError:
+            pass  # failed features are included in the incomplete report
+        return part(self.doc)
+
+    def dimensions(self) -> dict:
+        """World-axis bounding-box minimum, maximum, XYZ size and diagonal, in mm."""
+        from .core.measure import model_dimensions
+        self._ensure_built()
+        return model_dimensions(self.doc.body)
+
+    def set_material(self, name=None, *, density=None):
+        """Persist physical material for mass properties. Density: kg/m³; no args clears.
+
+        FEA study materials remain independent.
+        """
+        from .core.mass_properties import material
+        self.doc.mass_material = material(name, density)
+        return self
+
+    def mass_properties(self):
+        """Volume/area in mm³/mm², mass in kg, inertia in kg mm², world-axis coordinates."""
+        from .core.mass_properties import part
+        self._ensure_built()
+        return part(self.doc.body, self.doc.mass_material)
 
     def volume(self) -> float:
         self._ensure_built()
@@ -1201,6 +1234,12 @@ class Component:
         self.comp.fixed = bool(fixed)
         return self
 
+    def set_material(self, name=None, *, density=None):
+        """Persist an instance material override; no args restores the source-part material."""
+        from .core.mass_properties import material
+        self.comp.mass_material = material(name, density)
+        return self
+
 
 class Assembly:
     """Scripting facade for assemblies.
@@ -1223,6 +1262,16 @@ class Assembly:
         from .core.bom import BOMTable
         table = BOMTable("BOM")
         return table.refresh(self.asm)
+
+    def check_geometry(self):
+        """Check every component instance, including missing geometry and load failures."""
+        from .core.geometry_check import assembly
+        return assembly(self.asm)
+
+    def mass_properties(self):
+        """Sum instance mass properties in world coordinates, with per-component densities."""
+        from .core.mass_properties import assembly
+        return assembly(self.asm)
 
     @classmethod
     def open(cls, path) -> "Assembly":
@@ -1384,12 +1433,25 @@ class Assembly:
             out["frame"], out["distances"] = r["frame"], r["distances"]
         return out
 
+    def check_interference(self, min_volume=1e-3, ignore=()):
+        """Complete overlap check; missing/invalid geometry raises instead of being skipped.
+
+        Volumes are pairwise mm³. Their sum can count triple intersections more than once.
+        """
+        ids = [(self._cid(a), self._cid(b)) for a, b in ignore]
+        names = {c.id: c.name for c in self.asm.components}
+        hits = self.asm.interference(min_volume, ids, strict=True)
+        return dict(overlaps=[dict(a=names[h['a']], b=names[h['b']], volume=h['volume']) for h in hits],
+                    min_volume=min_volume, component_count=len(self.asm.components),
+                    ignored_pairs=len({frozenset(pair) for pair in ids}),
+                    pair_volume_sum=sum(h['volume'] for h in hits))
+
     def clearance(self, a, b=None) -> dict:
         """Minimum distance [mm] between two components, or from `a` to the nearest other
         component (b=None): {a, b, distance, point_a, point_b, overlap}. Distance 0 means
         touching or overlapping; overlap [mm3] > 0 means they interfere."""
         return self._clearance_out(self.asm.clearance(self._cid(a),
-                                                      self._cid(b) if b is not None else None))
+                                                      self._cid(b) if b is not None else None, strict=True))
 
     def clearance_sweep(self, a, b=None, keyframes=None, frames=12, poses=None) -> dict:
         """Smallest clearance between a and b (or anything) over a motion: drive the mates

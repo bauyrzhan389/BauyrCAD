@@ -227,6 +227,14 @@ class MainWindow(QMainWindow):
                              "Native SolidWorks part (.SLDPRT) with the feature tree rebuilt, made "
                              "by the SolidWorks installed on this PC")
         self.a_parameters = A("Parameters and Equations", "", self.edit_parameters)
+        self.a_bounds = A("Bounding Box", "bounds", self.show_dimensions)
+        self.a_section = A("Section View", "section", self.show_section)
+        self.a_section.setCheckable(True)
+        self.a_check_geometry = A("Check Geometry", "check_geometry", self.show_geometry_check)
+        from .view_image import export_view, copy_view
+        self.a_view_image = A("Save View Image...", "view_image", lambda: export_view(self))
+        self.a_copy_view = A("Copy View Image", "copy_view_image", lambda: copy_view(self))
+        self.a_mass = A("Mass Properties", "mass_properties", self.show_mass_properties)
         self.a_measure = A("Measure", "measure", self.start_measure, None,
                            "Measure faces, edges and vertices: sizes, distance, angle "
                            "(command: MEA)")
@@ -245,16 +253,26 @@ class MainWindow(QMainWindow):
                   self.a_open_drw, self.a_save, self.a_save_as, self.a_part_properties,
                   self.a_reload, self.a_autoreload,
                   None, self.a_import,
-                  self.a_export, self.a_export_sw_offline, self.a_export_sw, None, self.a_exit):
+                  self.a_export, self.a_export_sw_offline, self.a_export_sw, None, self.a_view_image,
+                  self.a_copy_view, None, self.a_exit):
             m.addSeparator() if a is None else m.addAction(a)
         m = mb.addMenu("&Edit")
         for a in (self.a_undo, self.a_redo, None, self.a_parameters, None, self.a_delete):
             m.addSeparator() if a is None else m.addAction(a)
         m = mb.addMenu("&View")
+        from .appearance import add_menu
+        self.background_actions = add_menu(self, m)
+        from .appearance import add_display_menu
+        self.display_actions = add_display_menu(self, m)
         for a in (self.a_front, self.a_top, self.a_right, self.a_iso, self.a_back, self.a_bottom,
                   self.a_left, None, self.a_normal, self.a_fit, self.a_view_selector, None,
-                  self.a_measure):
+                  self.a_measure, self.a_section, None, self.a_view_image, self.a_copy_view):
             m.addSeparator() if a is None else m.addAction(a)
+        evaluate = mb.addMenu("&Tools").addMenu("Evaluate")
+        evaluate.addAction(self.a_measure)
+        evaluate.addAction(self.a_bounds)
+        evaluate.addAction(self.a_mass)
+        evaluate.addAction(self.a_check_geometry)
         m = mb.addMenu("&Insert")
         sub = m.addMenu("Boss/Base")
         for a in (self.a_boss, self.a_revolve, self.a_sweep, self.a_loft, self.a_boundary):
@@ -334,6 +352,7 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
+        self.tabs.setTabPosition(QTabWidget.South)
         self.tabs.addTab(self._toolbar([
             self.a_boss, self.a_revolve, [self.a_sweep, self.a_loft, self.a_boundary], None,
             self.a_cut, self.a_hole, self.a_revolve_cut,
@@ -365,13 +384,14 @@ class MainWindow(QMainWindow):
                          "Simulation")
         self.tabs.addTab(self._toolbar([self.a_front, self.a_top, self.a_right, self.a_iso,
                                         None, self.a_normal, self.a_fit, self.a_view_selector,
-                                        None, self.a_measure]), "View")
+                                        None, self.a_measure, self.a_section]), "View")
         self.tabs.setMaximumHeight(96)
+        self.tabs.addTab(self._toolbar([self.a_measure, self.a_bounds, self.a_mass, self.a_check_geometry]), "Evaluate")
         self.tabs.currentChanged.connect(lambda _: self.refresh_view())
         root.addWidget(self.tabs)
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("color:#c9d3df;")
+        line.setStyleSheet("color:#cccccc;")
         root.addWidget(line)
 
         split = QSplitter(Qt.Horizontal)
@@ -395,7 +415,7 @@ class MainWindow(QMainWindow):
         head = QHBoxLayout()
         self.prop_icon = QLabel()
         self.prop_title = QLabel()
-        self.prop_title.setStyleSheet("font-size:15px;font-weight:600;color:#1f3b5c;")
+        self.prop_title.setStyleSheet("font-size:15px;font-weight:600;color:#333333;")
         head.addWidget(self.prop_icon)
         head.addWidget(self.prop_title, 1)
         pl.addLayout(head)
@@ -416,8 +436,10 @@ class MainWindow(QMainWindow):
         pl.addWidget(self.prop_scroll, 1)
         self.left.addWidget(prop)
 
-        split.addWidget(self.left)
+        from .workspace_layout import manager, viewport_tools
+        split.addWidget(manager(self))
         self.viewer = Viewer()
+        viewport_tools(self)
         split.addWidget(self.viewer)
         split.setStretchFactor(1, 1)
         split.setSizes([360, 1140])
@@ -433,14 +455,14 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key_Escape), self, self._escape)
 
         self.setStyleSheet("""
-            QTabWidget::pane { border: 0; background: #f3f6fa; }
-            QTabBar::tab { padding: 5px 16px; background: #e4eaf2; border: 1px solid #c9d3df;
+            QTabWidget::pane { border: 0; background: #f5f5f5; }
+            QTabBar::tab { padding: 5px 16px; background: #e8e8e8; border: 1px solid #cccccc;
                            border-bottom: 0; margin-right: 2px; }
-            QTabBar::tab:selected { background: #f3f6fa; font-weight: 600; }
-            QToolBar { background: #f3f6fa; border: 0; spacing: 2px; }
+            QTabBar::tab:selected { background: #f5f5f5; font-weight: 600; }
+            QToolBar { background: #f5f5f5; border: 0; spacing: 2px; }
             QToolButton { padding: 2px 6px; }
-            QToolButton:checked { background: #cfe0f7; border: 1px solid #7aa6e0; border-radius: 3px; }
-            QTreeWidget { background: #fbfcfe; border: 0; }
+            QToolButton:checked { background: #dddddd; border: 1px solid #888888; border-radius: 3px; }
+            QTreeWidget { background: #ffffff; border: 0; }
         """)
 
     def _connect_viewer(self):
@@ -642,7 +664,14 @@ class MainWindow(QMainWindow):
         R("RIGHT", "Right view", self.viewer.view_right, ("RI",), "right")
         R("ISOMETRIC", "Isometric view", self.viewer.view_isometric, ("ISO",), "iso")
         R("NORMALTO", "Normal to", self.view_normal_to, ("NT",), "normal_to")
-        R("MEASURE", "Measure", self.start_measure, ("MEA", "DIST"), "measure")
+        R("SECTION", "Section View", self.show_section, ("SEC",), "section")
+        R("CHECKGEOMETRY", "Check Geometry", self.show_geometry_check, ("CHECK",), "check_geometry")
+        from .view_image import export_view, copy_view
+        R("VIEWIMAGE", "Save View Image", lambda: export_view(self), (), "view_image")
+        R("COPYVIEW", "Copy View Image", lambda: copy_view(self), (), "copy_view_image")
+        R("MEASURE", "Measure", self.start_measure, ("MEA", "DIST", "EVALUATE"), "measure")
+        R("BOUNDINGBOX", "Bounding Box", self.show_dimensions, ("BBOX",), "bounds")
+        R("MASSPROP", "Mass Properties", self.show_mass_properties, ("MASS",), "mass_properties")
         R("SOLIDWORKS", "Export to SolidWorks (.SLDPRT)", self.export_solidworks, ("SW", "SLDPRT"), "solidworks")
         R("SWOFFLINE", "Export editable SolidWorks part without SolidWorks", self.export_solidworks_offline, (), "solidworks")
         R("VIEWSELECTOR", "View selector", self.viewer.show_view_selector, ("VS",), "iso")
@@ -764,6 +793,10 @@ class MainWindow(QMainWindow):
         self.selected_face = None
         if getattr(self, "measure_win", None) is not None:
             self.measure_win.model_changed()
+        if getattr(self, 'mass_win', None) is not None:
+            self.mass_win.model_changed()
+        if getattr(self, 'geometry_check_win', None) is not None:
+            self.geometry_check_win.model_changed()
         self._update_title()
         self.refresh_tree()
         self.refresh_view()
@@ -772,6 +805,8 @@ class MainWindow(QMainWindow):
             self.status(f"⚠ {errs[0].name}: {errs[0].error}")
 
     def _set_document(self, doc: Document, keep_view: bool = False):
+        if not keep_view and getattr(self, 'section_win', None) is not None:
+            self.section_win.close()
         if hasattr(self, "instant3d"):
             self.instant3d.clear()
         self.doc = doc
@@ -782,6 +817,10 @@ class MainWindow(QMainWindow):
         self._shown_tess = None
         if getattr(self, "measure_win", None) is not None:
             self.measure_win.model_changed()
+        if getattr(self, 'mass_win', None) is not None:
+            self.mass_win.model_changed()
+        if getattr(self, 'geometry_check_win', None) is not None:
+            self.geometry_check_win.model_changed()
         self._update_title()
         self.refresh_tree()
         self.refresh_view()
@@ -1256,6 +1295,10 @@ class MainWindow(QMainWindow):
         self._end_command()
 
     def _escape(self):
+        check = getattr(self, 'geometry_check_win', None)
+        if check is not None and check.isVisible():
+            check.close()
+            return
         if self.context_bar.isVisible():
             self.context_bar.hide_bar()
         mw = getattr(self, "measure_win", None)
@@ -1263,6 +1306,10 @@ class MainWindow(QMainWindow):
             mw.close()
             return
         if self.command is None:
+            sw = getattr(self, 'section_win', None)
+            if sw is not None and sw.isVisible():
+                sw.close()
+                return
             self.viewer.highlight_plane(None)
             if self.selected_face is not None:
                 self.selected_face = None
@@ -1272,6 +1319,9 @@ class MainWindow(QMainWindow):
             self.command_cancel()
 
     def _viewer_click(self, info):
+        section = getattr(self, 'section_win', None)
+        if section is not None and section.consume_pick(info):
+            return
         mw = getattr(self, "measure_win", None)
         if mw is not None and mw.isVisible() and self.command is None:
             mw.pick(*info.display, hit=info.topology)
@@ -1431,12 +1481,64 @@ class MainWindow(QMainWindow):
         from .measure_window import MeasureWindow
         if getattr(self, "measure_win", None) is None:
             self.measure_win = MeasureWindow(self)
+        if isinstance(first, bool):
+            first = None
+        if first is None and self.selected_face is not None:
+            first = ('face', self.selected_face)
         self.measure_win.open()
         self.selected_face = None
+        self.instant3d.clear()
         if first is not None:
             self.measure_win.add(*first)
         self.status("Measure: click faces, edges or vertices (Esc to close)")
         return self.measure_win
+
+    def show_dimensions(self):
+        window = self.start_measure()
+        if window is not None:
+            window.show_dimensions()
+
+    def show_section(self, checked=None):
+        if checked is False:
+            if getattr(self, "section_win", None) is not None:
+                self.section_win.close()
+            return
+        if getattr(self, 'command', None) is not None:
+            self.status('Finish the current command before editing Section View')
+            self.a_section.setChecked(self.viewer.section.plane is not None)
+            return
+        if getattr(self, 'mate_panel', False):
+            self.close_mate_panel()
+        self.a_section.setChecked(True)
+        from .section_view import SectionWindow
+        if getattr(self, "section_win", None) is None:
+            self.section_win = SectionWindow(self)
+        self.section_win.open()
+        return self.section_win
+
+    def show_geometry_check(self):
+        if getattr(self, 'command', None) is not None:
+            self.status('Finish the current command before checking geometry')
+            return
+        if getattr(self, 'mate_panel', False):
+            self.close_mate_panel()
+        if hasattr(self, '_finish_animation'):
+            self._finish_animation()
+        from .geometry_check_window import GeometryCheckWindow
+        if getattr(self, 'geometry_check_win', None) is None:
+            self.geometry_check_win = GeometryCheckWindow(self)
+        self.geometry_check_win.open()
+        return self.geometry_check_win
+
+    def show_mass_properties(self):
+        if self.command is not None:
+            self.status('Finish the current command first, then Mass Properties')
+            return
+        from .mass_properties_window import MassPropertiesWindow
+        if getattr(self, 'mass_win', None) is None:
+            self.mass_win = MassPropertiesWindow(self)
+        self.mass_win.open()
+        return self.mass_win
 
     def _viewer_right_click(self, info):
         mw = getattr(self, "measure_win", None)

@@ -214,6 +214,19 @@ class LineTool(Tool):
     def activate(self):
         self.last = None
         self.first = None
+        self._start_drag = False
+
+    def press(self, s, ev):
+        # A first-point drag draws a line. In an existing chain the press already
+        # commits an endpoint; releasing after mouse jitter must not add another.
+        self._start_drag = not self.pts
+        self.click(s)
+
+    def release(self, s, ev):
+        started = self._start_drag
+        self._start_drag = False
+        if started and ev.dragging and self.pts:
+            self.click(s)
 
     def constrain(self, s):
         if not self.pts or not self.locked:
@@ -263,6 +276,7 @@ class LineTool(Tool):
     def finish(self):
         had = bool(self.pts)
         self.pts, self.last = [], None
+        self._start_drag = False
         return had
 
     def preview(self):

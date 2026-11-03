@@ -145,6 +145,7 @@ class Component:
         self.pose = pose or Pose()
         self.fixed = fixed
         self.color = tuple(color) if color else None
+        self.mass_material = None  # optional physical-material override for this instance
         self.shape = None
         self.faces: list = []
         self.doc = None
@@ -204,6 +205,7 @@ class Component:
     def to_dict(self):
         return {"id": self.id, "name": self.name, "source": self.source, "fixed": self.fixed,
                 "instance_id": self.instance_id,
+                "mass_material": self.mass_material,
                 "pose": self.pose.to_dict(), "color": list(self.color) if self.color else None}
 
     @classmethod
@@ -211,6 +213,8 @@ class Component:
         comp = cls(d["id"], d["name"], d["source"], Pose.from_dict(d["pose"]), d.get("fixed", False),
                    d.get("color"))
         comp.instance_id = d.get("instance_id", "legacy:" + d["id"])
+        from .mass_properties import assignment
+        comp.mass_material = assignment(d.get('mass_material'))
         return comp
 
 
@@ -725,12 +729,26 @@ class Assembly:
         return solver.n - solver.rank()
 
     # ---- interference ------------------------------------------------------------------------
-    def interference(self, min_volume: float = 1e-3, ignore=()) -> list[dict]:
+    def interference(self, min_volume: float = 1e-3, ignore=(), *, strict=False,
+                     include_shapes=False, progress=None) -> list[dict]:
         """Pairs of components whose solids overlap by more than min_volume [mm3], largest
         first: [{"a": id, "b": id, "volume": mm3}]. Touching faces (a shaft in a bore of the
         same size) are not interference. `ignore`: pairs of component ids to skip (e.g. a
         press fit that is modelled line-on-line)."""
+        if not np.isfinite(min_volume) or min_volume < 0:
+            raise AssemblyError('Minimum overlap volume must be finite and non-negative (mm³)')
         skip = {frozenset(p) for p in ignore}
+        if strict:
+            ids = {c.id for c in self.components}
+            if any(len(pair) != 2 or not pair <= ids for pair in skip):
+                raise AssemblyError('Ignored pairs must identify two distinct existing components')
+            for c in self.components:
+                if c.shape is None or c.load_error:
+                    raise AssemblyError(f'{c.name}: component geometry is unavailable; check is incomplete')
+                try:
+                    geometry.require_closed_solids(c.shape)
+                except geometry.GeometryError as error:
+                    raise AssemblyError(f'{c.name}: closed solid geometry is required; check is incomplete') from error
         comps = [c for c in self.components if c.shape is not None]
         shapes = {c.id: c.world_shape() for c in comps}
         boxes = {cid: geometry.bounding_box(sh) for cid, sh in shapes.items()}
@@ -745,7 +763,9 @@ class Assembly:
         ordered = sorted(enumerate(comps), key=lambda item: boxes[item[1].id][0][axis])
         active = []
         hits = []
-        for index, current in ordered:
+        for step, (index, current) in enumerate(ordered):
+            if progress:
+                progress(step, len(ordered))
             low, high = boxes[current.id]
             active = [(i, c) for i, c in active if boxes[c.id][1][axis] >= low[axis]]
             for other_index, other in active:
@@ -756,24 +776,50 @@ class Assembly:
                 other_low, other_high = boxes[other.id]
                 if np.any(high < other_low) or np.any(other_high < low):
                     continue
-                v = geometry.common_volume(shapes[a.id], shapes[b.id])
+                if progress:
+                    progress(step, len(ordered))
+                try:
+                    overlap = geometry.common(shapes[a.id], shapes[b.id]) if include_shapes else None
+                    v = max(geometry.volume(overlap), 0) if include_shapes else geometry.common_volume(shapes[a.id], shapes[b.id])
+                except Exception as error:
+                    raise AssemblyError(f'{a.name} / {b.name}: intersection failed; check is incomplete') from error
                 if v > min_volume:
-                    hits.append((i, j, {"a": a.id, "b": b.id, "volume": v}))
+                    hit = {"a": a.id, "b": b.id, "volume": v}
+                    if include_shapes:
+                        hit['shape'] = overlap
+                    hits.append((i, j, hit))
             active.append((index, current))
         out = [hit for _, _, hit in sorted(hits, key=lambda hit: hit[:2])]
+        if progress:
+            progress(len(ordered), len(ordered))
         return sorted(out, key=lambda d: -d["volume"])
 
-    def clearance(self, a, b=None) -> dict:
-        """Minimum distance between component a and component b, or (b=None) the nearest other
-        component: {"a", "b", "distance" mm, "point_a", "point_b" (world), "overlap" mm3}.
-        Distance 0 means touching or overlapping; overlap > 0 means they interfere."""
+    def clearance(self, a, b=None, *, strict=False, progress=None) -> dict:
+        """Minimum gap and closest world points; b=None finds one nearest neighbour.
+
+        strict checks every requested solid, including candidates pruned by bounding boxes.
+        Progress callbacks run between kernel operations and may raise InterruptedError.
+        """
         ca = self.component(a)
         if ca is None or ca.shape is None:
-            raise AssemblyError(f"No solid component {a!r}")
-        others = [self.component(b)] if b is not None else \
-            [c for c in self.components if c.id != ca.id and c.shape is not None]
-        if not others or others[0] is None or others[0].shape is None:
-            raise AssemblyError(f"No solid component {b!r}")
+            raise AssemblyError(f"No solid component {a!r}; check is incomplete")
+        if b is not None and b == ca.id:
+            raise AssemblyError('Choose two different components')
+        others = ([self.component(b)] if b is not None else
+                  [c for c in self.components if c.id != ca.id and (strict or c.shape is not None)])
+        if not others:
+            raise AssemblyError('No other component to check')
+        total = 2 * len(others) + 1
+        for index, c in enumerate([ca] + others):
+            if progress:
+                progress(index, total)
+            if c is None or c.shape is None or (strict and c.load_error):
+                raise AssemblyError(f'{c.name if c else b}: component geometry is unavailable; check is incomplete')
+            if strict:
+                try:
+                    geometry.require_closed_solids(c.shape)
+                except geometry.GeometryError as error:
+                    raise AssemblyError(f'{c.name}: closed solid geometry is required; check is incomplete') from error
         sa = ca.world_shape()
         la, ha = geometry.bounding_box(sa)
         cands = []
@@ -782,17 +828,22 @@ class Assembly:
             lc, hc = geometry.bounding_box(sc)
             cands.append((geometry.box_distance(la, ha, lc, hc), c, sc))
         best = None
-        for lower, c, sc in sorted(cands, key=lambda t: t[0]):
-            if best is not None and lower > best["distance"]:
-                break                                  # boxes are lower bounds: done
-            d, pa, pb = geometry.min_distance(sa, sc)
-            if best is None or d < best["distance"]:
-                best = {"a": ca.id, "b": c.id, "distance": d, "point_a": pa, "point_b": pb,
-                        "overlap": 0.0, "_shape": sc}
-        if best["distance"] < 1e-9:
-            best["overlap"] = geometry.common_volume(sa, best["_shape"])
-        best.pop("_shape")
+        for index, (lower, c, sc) in enumerate(sorted(cands, key=lambda t: t[0])):
+            if progress:
+                progress(len(others) + 1 + index, total)
+            if best is not None and lower > best['distance']:
+                break
+            try:
+                d, pa, pb = geometry.min_distance(sa, sc)
+                if best is None or d < best['distance']:
+                    overlap = geometry.common_volume(sa, sc) if d < 1e-9 else 0.0
+                    best = dict(a=ca.id, b=c.id, distance=d, point_a=pa, point_b=pb, overlap=overlap)
+            except Exception as error:
+                raise AssemblyError(f'{ca.name} / {c.name}: clearance calculation failed; check is incomplete') from error
+        if progress:
+            progress(total, total)
         return best
+
 
     def clearance_sweep(self, a, b, poses: list[dict]) -> dict:
         """Clearance between a and b (b=None: any other component) over a list of

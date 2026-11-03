@@ -22,6 +22,7 @@ class Document:
         self.path: Path | None = None
         self.part_number = ""
         self.description = ""
+        self.mass_material = None
         self.parameters = {}
         self.parameter_bindings = []
         self.body = None
@@ -159,6 +160,7 @@ class Document:
     def to_dict(self) -> dict:
         return {"format": FILE_FORMAT, "version": FILE_VERSION if self.parameters or self.parameter_bindings else 1, "units": "mm",
                 "part_number": self.part_number, "description": self.description,
+                "mass_material": self.mass_material,
                 "parameters": self.parameters, "parameter_bindings": self.parameter_bindings,
                 "features": [f.to_dict() for f in self.features],
                 "studies": [s.to_dict() for s in self.studies]}
@@ -172,6 +174,8 @@ class Document:
         doc = cls()
         doc.part_number = str(d.get("part_number", ""))
         doc.description = str(d.get("description", ""))
+        from .mass_properties import assignment
+        doc.mass_material = assignment(d.get('mass_material'))
         from copy import deepcopy
         doc.parameters = deepcopy(d.get("parameters", {}))
         doc.parameter_bindings = deepcopy(d.get("parameter_bindings", []))

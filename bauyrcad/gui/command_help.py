@@ -11,6 +11,17 @@ from PySide6.QtSvg import QSvgRenderer
 
 
 DESCRIPTIONS = {
+    "check_geometry": "Check kernel validity, closed solid bodies, loose geometry and missing components.",
+    "hide_component": "Hide or show the selected component in the current assembly view.",
+    "show_components": "Restore every component in the assembly view.",
+    "isolate_component": "Show only the selected component; exit to restore previous visibility.",
+    "bounds": "Show overall world-axis dimensions of the model.",
+    "mass_properties": "Inspect mass, centre of gravity, inertia and physical material assignments.",
+    "interference": "Check assembly components for intersecting volumes at their current poses.",
+    "clearance": "Measure the minimum gap between components and compare it with a required gap.",
+    "section": "Cut the displayed model to inspect its interior without changing the geometry.",
+    "view_image": "Save the visible model and inspection labels as a PNG image.",
+    "copy_view_image": "Copy the current viewport image to the clipboard.",
     "new": "Create a new document.", "open": "Open an existing BauyrCAD document.",
     "save": "Save the current document.", "export": "Export geometry to another file format.",
     "import": "Bring an existing part or geometry file into the document.",
